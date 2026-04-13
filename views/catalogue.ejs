@@ -43,26 +43,55 @@
     <div class="panel-head">
       <div>
         <p class="eyebrow">Lookup</p>
-        <h2>Find by SKU or description</h2>
-        <p>Search the current shared snapshot and queue several product photos from desktop or directly from a phone camera before uploading them together.</p>
+        <h2>Filter catalogue and manage photos</h2>
+        <p>Use several search filters together, preview reference images in a lightbox, and stage mobile photos inside each product card until you finalise the upload.</p>
       </div>
       <span class="chip" id="resultCountChip">0 matches</span>
     </div>
-    <div class="search-row">
-      <label class="field field--grow">
-        <span>Search</span>
-        <input type="search" id="catalogQuery" placeholder="Try olive oil, 2037915, gift box...">
-      </label>
-      <button type="button" id="searchButton">Search</button>
-      <button type="button" class="ghost-button" id="clearButton">Clear</button>
+    <div class="search-panel">
+      <div class="search-grid">
+        <label class="field">
+          <span>SKU / barcode</span>
+          <input type="search" id="catalogSkuQuery" class="catalog-filter-input" placeholder="50012345 or barcode">
+        </label>
+        <label class="field">
+          <span>Description filter 1</span>
+          <input type="search" id="catalogDescOne" class="catalog-filter-input" placeholder="outer">
+        </label>
+        <label class="field">
+          <span>Description filter 2</span>
+          <input type="search" id="catalogDescTwo" class="catalog-filter-input" placeholder="20 inch">
+        </label>
+        <label class="field">
+          <span>Description filter 3</span>
+          <input type="search" id="catalogDescThree" class="catalog-filter-input" placeholder="olive / blue / glass">
+        </label>
+      </div>
+      <div class="search-actions">
+        <button type="button" id="searchButton">Search</button>
+        <button type="button" class="ghost-button" id="clearButton">Clear</button>
+      </div>
     </div>
     <div class="empty-state" id="emptyState">
       <strong><%= catalogMeta.available ? "Search to load catalogue items" : "No shared catalogue imported yet" %></strong>
-      <span><%= catalogMeta.available ? "Start with a SKU or a few description words." : "An admin needs to upload the workbook first." %></span>
+      <span><%= catalogMeta.available ? "Use one filter or stack several together to narrow the results." : "An admin needs to upload the workbook first." %></span>
     </div>
     <div id="resultsGrid" class="results-grid"></div>
   </section>
 </main>
+
+<div id="imageLightbox" class="lightbox" hidden>
+  <button type="button" class="lightbox__close" id="lightboxClose" aria-label="Close image viewer">&times;</button>
+  <button type="button" class="lightbox__nav" id="lightboxPrev" aria-label="Previous image">Previous</button>
+  <figure class="lightbox__frame">
+    <img id="lightboxImage" src="" alt="">
+    <figcaption class="lightbox__caption">
+      <strong id="lightboxTitle"></strong>
+      <span id="lightboxText"></span>
+    </figcaption>
+  </figure>
+  <button type="button" class="lightbox__nav" id="lightboxNext" aria-label="Next image">Next</button>
+</div>
 
 <script>
   window.ITEMTRACKER_BOOTSTRAP = <%- safeJson({

@@ -23,6 +23,24 @@ function getFlash(req) {
   return flash;
 }
 
+function cleanSearchFilters(...values) {
+  const cleaned = [];
+  const seen = new Set();
+  for (const value of values) {
+    const items = Array.isArray(value) ? value : [value];
+    for (const raw of items) {
+      const text = String(raw || "").trim();
+      const key = text.toUpperCase();
+      if (!text || seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      cleaned.push(text);
+    }
+  }
+  return cleaned;
+}
+
 async function createApp() {
   const app = express();
   const service = new ItemTrackerService(config);
@@ -183,11 +201,21 @@ async function createApp() {
     "/api/catalog/search",
     requireLoginApi,
     asyncHandler(async (req, res) => {
-      const limit = Math.max(1, Math.min(120, Number.parseInt(req.query.limit || `${MAX_RESULTS}`, 10)));
-      const result = await service.searchCatalog(req.query.q || "", undefined, limit);
+      const parsedLimit = Number.parseInt(req.query.limit || `${MAX_RESULTS}`, 10);
+      const limit = Number.isFinite(parsedLimit) ? Math.max(1, Math.min(120, parsedLimit)) : MAX_RESULTS;
+      const query = String(req.query.q || "").trim();
+      const filters = cleanSearchFilters(
+        req.query.sku,
+        req.query.term,
+        req.query.desc1,
+        req.query.desc2,
+        req.query.desc3
+      );
+      const result = await service.searchCatalog(query, undefined, limit, filters);
       return res.json({
         ok: true,
-        query: req.query.q || "",
+        query,
+        filters,
         total: result.rows.length,
         rows: result.rows,
         meta: result.meta

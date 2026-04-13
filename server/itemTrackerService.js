@@ -68,6 +68,52 @@ function recordFileName(record, fieldName) {
   return String(value || "").trim();
 }
 
+function normalizeFilterPhrases(query = "", filters = []) {
+  const phrases = [];
+  const seen = new Set();
+  for (const rawValue of [query, ...(filters || [])]) {
+    const value = cleanText(rawValue).toUpperCase();
+    if (!value || seen.has(value)) {
+      continue;
+    }
+    seen.add(value);
+    phrases.push(value);
+  }
+  return phrases;
+}
+
+function splitFilterTerms(phrases) {
+  const terms = [];
+  const seen = new Set();
+  for (const phrase of phrases || []) {
+    for (const part of String(phrase || "").split(/\s+/).filter(Boolean)) {
+      if (seen.has(part)) {
+        continue;
+      }
+      seen.add(part);
+      terms.push(part);
+    }
+  }
+  return terms;
+}
+
+function fieldScore(value, phrase, exactScore, prefixScore, containsScore) {
+  const text = String(value || "").toUpperCase();
+  if (!text || !phrase) {
+    return 0;
+  }
+  if (text === phrase) {
+    return exactScore;
+  }
+  if (text.startsWith(phrase)) {
+    return prefixScore;
+  }
+  if (text.includes(phrase)) {
+    return containsScore;
+  }
+  return 0;
+}
+
 class ItemTrackerService {
   constructor(config) {
     this.config = config;
@@ -247,13 +293,13 @@ class ItemTrackerService {
     return { snapshot, meta };
   }
 
-  scoreItem(item, queryUpper, terms) {
+  scoreItem(item, primaryPhrase, phrases, terms) {
     const sku = String(item.sku || "").toUpperCase();
     const barcode = String(item.barcode || "").toUpperCase();
     const description = String(item.description || "").toUpperCase();
     const searchText = String(item.search_text || "").toUpperCase();
 
-    if (!queryUpper) {
+    if (!terms.length) {
       return 0;
     }
     if (terms.some((term) => !searchText.includes(term))) {
@@ -261,36 +307,34 @@ class ItemTrackerService {
     }
 
     let score = 0;
-    if (sku === queryUpper) score += 12000;
-    else if (sku.startsWith(queryUpper)) score += 9000;
-    else if (sku.includes(queryUpper)) score += 7000;
-
-    if (barcode) {
-      if (barcode === queryUpper) score += 10500;
-      else if (barcode.startsWith(queryUpper)) score += 7600;
-      else if (barcode.includes(queryUpper)) score += 6100;
+    for (const phrase of phrases) {
+      const weight = phrase === primaryPhrase ? 1 : 0.58;
+      score += fieldScore(sku, phrase, Math.round(12000 * weight), Math.round(9000 * weight), Math.round(7000 * weight));
+      score += fieldScore(barcode, phrase, Math.round(10500 * weight), Math.round(7600 * weight), Math.round(6100 * weight));
+      score += fieldScore(description, phrase, Math.round(8600 * weight), Math.round(5200 * weight), Math.round(3600 * weight));
     }
 
-    if (description === queryUpper) score += 8600;
-    else if (description.startsWith(queryUpper)) score += 5200;
-    else if (description.includes(queryUpper)) score += 3600;
+    if (phrases.length > 1 && phrases.every((phrase) => description.includes(phrase))) {
+      score += Math.min(1500, 320 * phrases.length);
+    }
 
     if (item.active) score += 60;
-    score += Math.min(900, terms.length * 180);
+    score += Math.min(1200, terms.length * 180 + phrases.length * 120);
     return score;
   }
 
-  async searchCatalog(query, clientCode = DEFAULT_CLIENT_CODE, limit = MAX_RESULTS) {
+  async searchCatalog(query = "", clientCode = DEFAULT_CLIENT_CODE, limit = MAX_RESULTS, filters = []) {
     const { snapshot, meta } = await this.loadSnapshot(clientCode);
-    const queryUpper = cleanText(query).toUpperCase();
-    if (!snapshot || !queryUpper) {
+    const phrases = normalizeFilterPhrases(query, filters);
+    if (!snapshot || !phrases.length) {
       return { rows: [], meta };
     }
 
-    const terms = queryUpper.split(/\s+/).filter(Boolean);
+    const primaryPhrase = cleanText(query).toUpperCase() || phrases[0];
+    const terms = splitFilterTerms(phrases);
     const scored = [];
     for (const item of snapshot.items || []) {
-      const score = this.scoreItem(item, queryUpper, terms);
+      const score = this.scoreItem(item, primaryPhrase, phrases, terms);
       if (score > 0) {
         scored.push([score, item.sku || "", item]);
       }
