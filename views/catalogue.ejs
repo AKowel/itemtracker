@@ -1,12 +1,15 @@
 <%- include("partials/head", { pageTitle, assetVersion }) %>
 <%- include("partials/header", { appName, currentUser, flash, bootstrapError }) %>
 
+<div id="offlineBanner" class="offline-banner" hidden>
+  <span>You're offline — photos you upload will be queued and sent automatically when you reconnect</span>
+</div>
+
 <main class="page-shell">
   <section class="hero-card">
     <div class="hero-card__copy">
       <p class="eyebrow">Shared Catalogue</p>
       <h1>Search once, use everywhere</h1>
-      <p>The hosted app writes to the same PocketBase collections that the local PI-App refresh reads from, so imports and photos stay shared across both sides.</p>
       <div class="hero-card__chips">
         <span class="chip" id="metaSourceChip">Source: <%= catalogMeta.source || "none" %></span>
         <span class="chip" id="metaCountChip"><%= Number(catalogMeta.row_count || 0).toLocaleString() %> items</span>

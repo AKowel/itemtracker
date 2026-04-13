@@ -1,0 +1,21 @@
+{
+  "name": "Item Tracker",
+  "short_name": "ItemTracker",
+  "description": "Shared catalogue and photo-capture app",
+  "start_url": "/catalogue",
+  "display": "standalone",
+  "background_color": "#f6f1e8",
+  "theme_color": "#1a5ca8",
+  "icons": [
+    {
+      "src": "/static/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/static/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

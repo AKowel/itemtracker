@@ -50,6 +50,99 @@
   const scannerFallbackRegion = document.getElementById("scannerFallbackRegion");
   const scannerStatus = document.getElementById("scannerStatus");
 
+  // ── Offline banner ─────────────────────────────────────────────────────
+  const offlineBanner = document.getElementById("offlineBanner");
+
+  function syncOfflineBanner() {
+    if (!offlineBanner) return;
+    offlineBanner.hidden = navigator.onLine;
+  }
+
+  window.addEventListener("online", syncOfflineBanner);
+  window.addEventListener("offline", syncOfflineBanner);
+  syncOfflineBanner();
+
+  // ── IndexedDB upload queue ──────────────────────────────────────────────
+  // When the device is offline, staged uploads are stored here and flushed
+  // automatically the next time the page detects an online event.
+
+  const IDB_NAME = "itemtracker-queue";
+  const IDB_STORE = "uploads";
+  const IDB_VERSION = 1;
+  let _idbPromise = null;
+
+  function openIDB() {
+    if (!_idbPromise) {
+      _idbPromise = new Promise(function (resolve, reject) {
+        var req = indexedDB.open(IDB_NAME, IDB_VERSION);
+        req.onupgradeneeded = function (e) {
+          var db = e.target.result;
+          if (!db.objectStoreNames.contains(IDB_STORE)) {
+            db.createObjectStore(IDB_STORE, { keyPath: "id", autoIncrement: true });
+          }
+        };
+        req.onsuccess = function (e) { resolve(e.target.result); };
+        req.onerror = function (e) { reject(e.target.error); };
+      });
+    }
+    return _idbPromise;
+  }
+
+  async function idbQueueUpload(sku, caption, entries) {
+    const db = await openIDB();
+    return new Promise(function (resolve, reject) {
+      const files = entries.map(function (e) {
+        return { file: e.file, name: e.file.name, type: e.file.type };
+      });
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      const req = tx.objectStore(IDB_STORE).add({ sku, caption, files, timestamp: Date.now() });
+      req.onsuccess = function () { resolve(req.result); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+
+  async function idbGetAll() {
+    const db = await openIDB();
+    return new Promise(function (resolve, reject) {
+      const tx = db.transaction(IDB_STORE, "readonly");
+      const req = tx.objectStore(IDB_STORE).getAll();
+      req.onsuccess = function () { resolve(req.result || []); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+
+  async function idbRemove(id) {
+    const db = await openIDB();
+    return new Promise(function (resolve, reject) {
+      const tx = db.transaction(IDB_STORE, "readwrite");
+      const req = tx.objectStore(IDB_STORE).delete(id);
+      req.onsuccess = function () { resolve(); };
+      req.onerror = function () { reject(req.error); };
+    });
+  }
+
+  async function flushUploadQueue() {
+    let queued;
+    try { queued = await idbGetAll(); } catch { return; }
+    if (!queued.length) return;
+
+    for (const item of queued) {
+      try {
+        const entries = item.files.map(function (f) {
+          return { file: new File([f.file], f.name, { type: f.type }) };
+        });
+        for (let i = 0; i < entries.length; i += 6) {
+          await uploadChunk(item.sku, item.caption, entries.slice(i, i + 6));
+        }
+        await idbRemove(item.id);
+        await refreshSummary();
+        window.ItemTracker?.toast(`${item.files.length} photo${item.files.length === 1 ? "" : "s"} added to ${item.sku}`, "success");
+      } catch {
+        // Leave in queue — will retry on next online event
+      }
+    }
+  }
+
   const PLACEHOLDER_IMAGE = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Crect width='100%25' height='100%25' fill='%23eef3f9'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2361728a' font-size='13' font-family='Arial'%3ENo Photo%3C/text%3E%3C/svg%3E";
   const IMAGE_MAX_DIMENSION = 1600;
   const IMAGE_TARGET_BYTES = 450000;
@@ -905,7 +998,7 @@
     renderRows(latestRows);
     const savedBytes = Math.max(0, originalBytes - compressedBytes);
     const savedText = savedBytes > 0 ? ` after saving ${formatBytes(savedBytes)}` : "";
-    window.ItemTracker?.toast(`${current.length} staged photo${current.length === 1 ? "" : "s"} ready for ${sku}${savedText}`);
+    window.ItemTracker?.toast(`${current.length} staged photo${current.length === 1 ? "" : "s"} ready for ${sku}${savedText}`, "info");
   }
 
   function removeQueuedImage(sku, fileId) {
@@ -949,6 +1042,26 @@
     }
 
     const caption = getCaptionDraft(sku);
+
+    // ── Offline path — store to IDB and show queue toast ─────────────────
+    if (!navigator.onLine) {
+      try {
+        await idbQueueUpload(sku, caption, queuedEntries);
+        releaseEntries(queuedEntries);
+        pendingUploads.delete(String(sku || ""));
+        captionDrafts.delete(String(sku || ""));
+        renderRows(latestRows);
+        window.ItemTracker?.toast(
+          `${queuedEntries.length} photo${queuedEntries.length === 1 ? "" : "s"} queued for ${sku} — uploading when back online`,
+          "info"
+        );
+      } catch {
+        window.ItemTracker?.toast("Could not save photos for offline upload", "error");
+      }
+      return;
+    }
+
+    // ── Online path ───────────────────────────────────────────────────────
     let uploadedCount = 0;
     let latestImages = null;
     card.style.opacity = "0.65";
@@ -970,19 +1083,42 @@
       captionDrafts.delete(String(sku || ""));
       renderRows(latestRows);
       await refreshSummary();
-      window.ItemTracker?.toast(`${uploadedCount} photo${uploadedCount === 1 ? "" : "s"} uploaded for ${sku}`);
+      window.ItemTracker?.toast(`${uploadedCount} photo${uploadedCount === 1 ? "" : "s"} added to ${sku}`, "success");
     } catch (error) {
+      // If we lost connection mid-upload, queue remaining entries to IDB
+      const isNetworkError = error instanceof TypeError;
+      const remaining = queuedEntries.slice(uploadedCount);
+
       if (uploadedCount > 0) {
         releaseEntries(queuedEntries.slice(0, uploadedCount));
-        replacePendingEntries(String(sku || ""), queuedEntries.slice(uploadedCount));
         const row = getRowForSku(sku);
-        if (row && latestImages) {
-          row.images = latestImages;
-        }
+        if (row && latestImages) row.images = latestImages;
         renderRows(latestRows);
-        window.ItemTracker?.toast(`Uploaded ${uploadedCount} photo${uploadedCount === 1 ? "" : "s"} before an error: ${error.message || "Could not finish upload"}`);
+      }
+
+      if (isNetworkError && remaining.length > 0) {
+        try {
+          await idbQueueUpload(sku, caption, remaining);
+          releaseEntries(remaining);
+          pendingUploads.delete(String(sku || ""));
+          captionDrafts.delete(String(sku || ""));
+          renderRows(latestRows);
+          const msg = uploadedCount > 0
+            ? `${uploadedCount} uploaded, ${remaining.length} queued for ${sku} — connection lost`
+            : `${remaining.length} photo${remaining.length === 1 ? "" : "s"} queued for ${sku} — uploading when back online`;
+          window.ItemTracker?.toast(msg, "info");
+        } catch {
+          replacePendingEntries(String(sku || ""), remaining);
+          window.ItemTracker?.toast(error.message || "Could not upload — check your connection", "error");
+        }
+      } else if (uploadedCount > 0) {
+        replacePendingEntries(String(sku || ""), remaining);
+        window.ItemTracker?.toast(
+          `Uploaded ${uploadedCount} photo${uploadedCount === 1 ? "" : "s"} before an error: ${error.message || "Could not finish upload"}`,
+          "error"
+        );
       } else {
-        window.ItemTracker?.toast(error.message || "Could not upload image");
+        window.ItemTracker?.toast(error.message || "Could not upload image", "error");
       }
     } finally {
       card.style.opacity = "";
@@ -1015,10 +1151,10 @@
       importForm.reset();
       if (importStatusChip) importStatusChip.textContent = "Import complete";
       setEmptyState("Shared workbook updated", "Search to load the latest imported items.");
-      window.ItemTracker?.toast("Workbook imported");
+      window.ItemTracker?.toast("Workbook imported", "success");
     } catch (error) {
       if (importStatusChip) importStatusChip.textContent = "Import failed";
-      window.ItemTracker?.toast(error.message || "Could not import workbook");
+      window.ItemTracker?.toast(error.message || "Could not import workbook", "error");
     }
   }
 
@@ -1111,6 +1247,19 @@
     Array.from(pendingUploads.values()).forEach((entries) => releaseEntries(entries));
     closeScannerModal();
   });
+
+  // ── Upload queue flush ─────────────────────────────────────────────────
+  // Flush any IDB-queued uploads as soon as connectivity is available,
+  // both on reconnect and on initial page load (for items queued last session).
+  window.addEventListener("online", function () {
+    syncOfflineBanner();
+    flushUploadQueue();
+  });
+
+  if (navigator.onLine) {
+    // Small delay so the page finishes rendering before kicking off uploads
+    setTimeout(flushUploadQueue, 1200);
+  }
 
   setMeta(catalogMeta);
   if (canLoadSummary()) {

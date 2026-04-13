@@ -79,6 +79,17 @@ async function createApp() {
   );
   app.use("/static", express.static(path.join(process.cwd(), "static")));
 
+  app.get("/sw.js", (req, res) => {
+    res.setHeader("Content-Type", "application/javascript; charset=utf-8");
+    res.setHeader("Service-Worker-Allowed", "/");
+    res.sendFile(path.join(process.cwd(), "static", "sw.js"));
+  });
+
+  app.get("/manifest.json", (req, res) => {
+    res.setHeader("Content-Type", "application/json; charset=utf-8");
+    res.sendFile(path.join(process.cwd(), "static", "manifest.json"));
+  });
+
   app.locals.assetVersion = assetVersion;
   app.locals.safeJson = safeJson;
 
