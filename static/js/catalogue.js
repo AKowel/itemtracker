@@ -16,6 +16,9 @@
   const metaImportedChip = document.getElementById("metaImportedChip");
   const importForm = document.getElementById("importForm");
   const importStatusChip = document.getElementById("importStatusChip");
+  const pendingUploads = new Map();
+  const captionDrafts = new Map();
+  let pendingUploadIndex = 0;
 
   function setMeta(meta) {
     catalogMeta = meta || {};
@@ -39,6 +42,47 @@
       .replace(/"/g, "&quot;");
   }
 
+  function getPendingEntries(sku) {
+    return pendingUploads.get(String(sku || "")) || [];
+  }
+
+  function getCaptionDraft(sku) {
+    return captionDrafts.get(String(sku || "")) || "";
+  }
+
+  function setCaptionDraft(sku, value) {
+    const key = String(sku || "");
+    const text = String(value || "");
+    if (text) {
+      captionDrafts.set(key, text);
+    } else {
+      captionDrafts.delete(key);
+    }
+  }
+
+  function releaseEntries(entries) {
+    (entries || []).forEach((entry) => {
+      if (entry?.previewUrl) {
+        URL.revokeObjectURL(entry.previewUrl);
+      }
+    });
+  }
+
+  function replacePendingEntries(sku, entries) {
+    const key = String(sku || "");
+    if (entries?.length) {
+      pendingUploads.set(key, entries);
+    } else {
+      pendingUploads.delete(key);
+    }
+  }
+
+  function clearPendingEntries(sku) {
+    const key = String(sku || "");
+    releaseEntries(getPendingEntries(key));
+    pendingUploads.delete(key);
+  }
+
   function renderRows(rows) {
     latestRows = Array.isArray(rows) ? rows : [];
     if (resultCountChip) {
@@ -58,6 +102,7 @@
     resultsGrid.innerHTML = latestRows
       .map((row) => {
         const images = Array.isArray(row.images) ? row.images : [];
+        const queued = getPendingEntries(row.sku);
         const badges = [
           row.active ? "Active" : "Inactive",
           row.barcode ? `Barcode ${row.barcode}` : "",
@@ -101,13 +146,40 @@
             </div>
             <div class="upload-box">
               <div class="upload-row">
-                <input type="text" class="caption-input" placeholder="Optional caption">
+                <input type="text" class="caption-input" data-sku="${escapeHtml(row.sku)}" value="${escapeHtml(getCaptionDraft(row.sku))}" placeholder="Optional caption">
                 <label class="upload-label">
-                  <span>Upload / Camera</span>
+                  <span>Add Photos / Camera</span>
                   <input type="file" class="image-input" accept="image/*" capture="environment" multiple>
                 </label>
               </div>
-              <p class="photo-help">Uploads here are shared back through PocketBase so local PI-App refreshes can see them too.</p>
+              ${
+                queued.length
+                  ? `
+                    <div class="queued-uploads">
+                      <div class="queued-uploads__head">
+                        <strong>${queued.length} photo${queued.length === 1 ? "" : "s"} queued</strong>
+                        <div class="queued-uploads__actions">
+                          <button type="button" class="ghost-button queue-clear-button" data-sku="${escapeHtml(row.sku)}">Clear Queue</button>
+                          <button type="button" class="queue-upload-button" data-sku="${escapeHtml(row.sku)}">Upload Queued Photos</button>
+                        </div>
+                      </div>
+                      <div class="queued-grid">
+                        ${queued
+                          .map(
+                            (entry) => `
+                              <div class="queued-photo">
+                                <button type="button" class="queued-photo__remove" data-sku="${escapeHtml(row.sku)}" data-file-id="${escapeHtml(entry.id)}" aria-label="Remove queued photo">x</button>
+                                <img src="${escapeHtml(entry.previewUrl)}" alt="Queued upload for ${escapeHtml(row.sku)}">
+                              </div>
+                            `
+                          )
+                          .join("")}
+                      </div>
+                    </div>
+                  `
+                  : ""
+              }
+              <p class="photo-help">Keep adding photos from the camera or gallery, then tap <strong>Upload Queued Photos</strong> when you are ready.</p>
             </div>
           </article>
         `;
@@ -119,9 +191,41 @@
         const card = input.closest(".result-card");
         const sku = card?.dataset?.sku || "";
         if (!sku || !input.files?.length) return;
-        const caption = card.querySelector(".caption-input")?.value || "";
-        await uploadImages(card, sku, caption, input.files);
+        stageImages(sku, input.files);
         input.value = "";
+      });
+    });
+
+    document.querySelectorAll(".caption-input").forEach((input) => {
+      input.addEventListener("input", () => {
+        setCaptionDraft(input.dataset.sku || "", input.value || "");
+      });
+    });
+
+    document.querySelectorAll(".queue-upload-button").forEach((button) => {
+      button.addEventListener("click", async () => {
+        const sku = button.dataset.sku || "";
+        const card = button.closest(".result-card");
+        if (!sku || !card) return;
+        await uploadQueuedImages(card, sku);
+      });
+    });
+
+    document.querySelectorAll(".queue-clear-button").forEach((button) => {
+      button.addEventListener("click", () => {
+        const sku = button.dataset.sku || "";
+        if (!sku) return;
+        clearPendingEntries(sku);
+        renderRows(latestRows);
+      });
+    });
+
+    document.querySelectorAll(".queued-photo__remove").forEach((button) => {
+      button.addEventListener("click", () => {
+        const sku = button.dataset.sku || "";
+        const fileId = button.dataset.fileId || "";
+        if (!sku || !fileId) return;
+        removeQueuedImage(sku, fileId);
       });
     });
   }
@@ -148,30 +252,95 @@
     }
   }
 
-  async function uploadImages(card, sku, caption, files) {
+  function stageImages(sku, files) {
+    const key = String(sku || "");
+    const current = getPendingEntries(key).slice();
+    Array.from(files || []).forEach((file) => {
+      if (!(file instanceof File) || !file.size) return;
+      current.push({
+        id: `${Date.now()}-${pendingUploadIndex += 1}`,
+        file,
+        previewUrl: URL.createObjectURL(file)
+      });
+    });
+    replacePendingEntries(key, current);
+    renderRows(latestRows);
+    window.ItemTracker?.toast(`${current.length} queued photo${current.length === 1 ? "" : "s"} ready for ${sku}`);
+  }
+
+  function removeQueuedImage(sku, fileId) {
+    const key = String(sku || "");
+    const current = getPendingEntries(key);
+    const keep = [];
+    const removed = [];
+    current.forEach((entry) => {
+      if (entry.id === fileId) {
+        removed.push(entry);
+      } else {
+        keep.push(entry);
+      }
+    });
+    releaseEntries(removed);
+    replacePendingEntries(key, keep);
+    renderRows(latestRows);
+  }
+
+  async function uploadChunk(sku, caption, entries) {
     const form = new FormData();
     form.append("sku", sku);
     form.append("caption", caption || "");
-    Array.from(files).forEach((file) => form.append("images", file));
+    entries.forEach((entry) => form.append("images", entry.file, entry.file.name));
+    const response = await fetch("/api/catalog/images", {
+      method: "POST",
+      body: form
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || "Could not upload image");
+    }
+    return data;
+  }
+
+  async function uploadQueuedImages(card, sku) {
+    const queuedEntries = getPendingEntries(sku).slice();
+    if (!queuedEntries.length) {
+      window.ItemTracker?.toast("Add some photos first");
+      return;
+    }
+    const caption = getCaptionDraft(sku);
+    let uploadedCount = 0;
+    let latestImages = null;
     card.style.opacity = "0.65";
     card.style.pointerEvents = "none";
     try {
-      const response = await fetch("/api/catalog/images", {
-        method: "POST",
-        body: form
-      });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(data.error || "Could not upload image");
+      for (let index = 0; index < queuedEntries.length; index += 6) {
+        const chunk = queuedEntries.slice(index, index + 6);
+        const data = await uploadChunk(sku, caption, chunk);
+        latestImages = data.images || latestImages;
+        uploadedCount += chunk.length;
       }
       const row = latestRows.find((entry) => entry.sku === sku);
       if (row) {
-        row.images = data.images || [];
+        row.images = latestImages || [];
       }
+      releaseEntries(queuedEntries);
+      pendingUploads.delete(String(sku || ""));
+      captionDrafts.delete(String(sku || ""));
       renderRows(latestRows);
-      window.ItemTracker?.toast(`Photo uploaded for ${sku}`);
+      window.ItemTracker?.toast(`${uploadedCount} photo${uploadedCount === 1 ? "" : "s"} uploaded for ${sku}`);
     } catch (error) {
-      window.ItemTracker?.toast(error.message || "Could not upload image");
+      if (uploadedCount > 0) {
+        releaseEntries(queuedEntries.slice(0, uploadedCount));
+        replacePendingEntries(String(sku || ""), queuedEntries.slice(uploadedCount));
+        const row = latestRows.find((entry) => entry.sku === sku);
+        if (row && latestImages) {
+          row.images = latestImages;
+        }
+        renderRows(latestRows);
+        window.ItemTracker?.toast(`Uploaded ${uploadedCount} photo${uploadedCount === 1 ? "" : "s"} before an error: ${error.message || "Could not finish upload"}`);
+      } else {
+        window.ItemTracker?.toast(error.message || "Could not upload image");
+      }
     } finally {
       card.style.opacity = "";
       card.style.pointerEvents = "";
@@ -229,6 +398,10 @@
   if (currentUser?.isAdmin && importForm) {
     importForm.addEventListener("submit", importWorkbook);
   }
+
+  window.addEventListener("beforeunload", () => {
+    Array.from(pendingUploads.values()).forEach((entries) => releaseEntries(entries));
+  });
 
   setMeta(catalogMeta);
 })();

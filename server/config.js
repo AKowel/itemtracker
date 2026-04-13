@@ -13,6 +13,7 @@ function asBool(value, fallback = false) {
 const config = {
   appName: process.env.APP_NAME || "Item Tracker",
   appBaseUrl: process.env.APP_BASE_URL || "https://cons.axephotography.co.uk",
+  host: process.env.HOST || "127.0.0.1",
   port: Number.parseInt(process.env.PORT || "3100", 10),
   pocketbaseUrl: (process.env.POCKETBASE_URL || "").replace(/\/$/, ""),
   pocketbaseAdminEmail: process.env.POCKETBASE_ADMIN_EMAIL || "",

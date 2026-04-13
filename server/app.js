@@ -275,8 +275,8 @@ async function createApp() {
 async function startServer() {
   const app = await createApp();
   await new Promise((resolve) => {
-    app.listen(config.port, () => {
-      console.log(`${config.appName} listening on http://127.0.0.1:${config.port}`);
+    app.listen(config.port, config.host, () => {
+      console.log(`${config.appName} listening on http://${config.host}:${config.port}`);
       resolve();
     });
   });
