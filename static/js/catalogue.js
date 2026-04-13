@@ -47,6 +47,7 @@
   const scannerModal = document.getElementById("barcodeScanner");
   const scannerCloseButton = document.getElementById("scannerCloseButton");
   const scannerVideo = document.getElementById("scannerVideo");
+  const scannerFallbackRegion = document.getElementById("scannerFallbackRegion");
   const scannerStatus = document.getElementById("scannerStatus");
 
   const PLACEHOLDER_IMAGE = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Crect width='100%25' height='100%25' fill='%23eef3f9'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2361728a' font-size='13' font-family='Arial'%3ENo Photo%3C/text%3E%3C/svg%3E";
@@ -58,6 +59,9 @@
   let scannerFrameHandle = 0;
   let scannerActive = false;
   let scannerBusy = false;
+  let scannerFallbackInstance = null;
+  let scannerScriptPromise = null;
+  let scannerMode = "";
 
   function setMeta(meta) {
     catalogMeta = meta || {};
@@ -125,6 +129,24 @@
 
   function canUseBarcodeScanner() {
     return Boolean(window.BarcodeDetector && navigator.mediaDevices?.getUserMedia);
+  }
+
+  async function ensureFallbackScannerLibrary() {
+    if (window.Html5Qrcode) {
+      return window.Html5Qrcode;
+    }
+    if (scannerScriptPromise) {
+      return scannerScriptPromise;
+    }
+    scannerScriptPromise = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js";
+      script.async = true;
+      script.onload = () => resolve(window.Html5Qrcode);
+      script.onerror = () => reject(new Error("Could not load the mobile barcode scanner library."));
+      document.head.appendChild(script);
+    });
+    return scannerScriptPromise;
   }
 
   function getSearchState() {
@@ -512,12 +534,37 @@
     if (scannerVideo) {
       scannerVideo.pause();
       scannerVideo.srcObject = null;
+      scannerVideo.hidden = false;
+    }
+    if (scannerFallbackRegion) {
+      scannerFallbackRegion.hidden = true;
+      scannerFallbackRegion.innerHTML = "";
     }
   }
 
-  function closeScannerModal() {
+  async function stopFallbackScanner() {
+    const instance = scannerFallbackInstance;
+    scannerFallbackInstance = null;
+    if (!instance) {
+      return;
+    }
+    try {
+      await instance.stop();
+    } catch (error) {
+      // ignore stop failures when scanner never fully started
+    }
+    try {
+      await instance.clear();
+    } catch (error) {
+      // ignore clear failures during teardown
+    }
+  }
+
+  async function closeScannerModal() {
     stopScannerLoop();
     stopScannerStream();
+    await stopFallbackScanner();
+    scannerMode = "";
     if (scannerModal) {
       scannerModal.hidden = true;
     }
@@ -553,7 +600,7 @@
     if (skuInput) {
       skuInput.value = barcode;
     }
-    closeScannerModal();
+    await closeScannerModal();
     await searchCatalog();
   }
 
@@ -589,37 +636,106 @@
     }
   }
 
-  async function openScannerModal() {
-    if (!canUseBarcodeScanner()) {
-      window.ItemTracker?.toast("Barcode scanning is supported in newer Chrome or Edge browsers.");
-      return;
+  async function openNativeScannerModal() {
+    scannerDetector = await buildBarcodeDetector();
+    scannerStream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: "environment" },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      },
+      audio: false
+    });
+    if (!scannerVideo) {
+      throw new Error("Scanner preview is not available.");
     }
+    scannerMode = "native";
+    if (scannerFallbackRegion) {
+      scannerFallbackRegion.hidden = true;
+      scannerFallbackRegion.innerHTML = "";
+    }
+    scannerVideo.hidden = false;
+    scannerVideo.srcObject = scannerStream;
+    await scannerVideo.play();
+    scannerActive = true;
+    if (scannerModal) {
+      scannerModal.hidden = false;
+    }
+    document.body.classList.add("scanner-open");
+    if (scannerStatus) {
+      scannerStatus.textContent = "Point the camera at a barcode to search the shared catalogue.";
+    }
+    scannerFrameHandle = window.requestAnimationFrame(scanBarcodeFrame);
+  }
+
+  function fallbackScannerFormats() {
+    if (!window.Html5QrcodeSupportedFormats) {
+      return undefined;
+    }
+    const formats = window.Html5QrcodeSupportedFormats;
+    return [
+      formats.EAN_13,
+      formats.EAN_8,
+      formats.UPC_A,
+      formats.UPC_E,
+      formats.CODE_128,
+      formats.CODE_39,
+      formats.ITF,
+      formats.CODABAR
+    ].filter(Boolean);
+  }
+
+  async function openFallbackScannerModal() {
+    await ensureFallbackScannerLibrary();
+    if (!scannerFallbackRegion) {
+      throw new Error("Scanner fallback region is not available.");
+    }
+    scannerMode = "fallback";
+    if (scannerVideo) {
+      scannerVideo.hidden = true;
+    }
+    scannerFallbackRegion.hidden = false;
+    scannerFallbackRegion.innerHTML = "";
+    scannerFallbackInstance = new window.Html5Qrcode(scannerFallbackRegion.id, { verbose: false });
+    if (scannerModal) {
+      scannerModal.hidden = false;
+    }
+    document.body.classList.add("scanner-open");
+    if (scannerStatus) {
+      scannerStatus.textContent = "Point the camera at a barcode to search the shared catalogue.";
+    }
+    await scannerFallbackInstance.start(
+      { facingMode: "environment" },
+      {
+        fps: 10,
+        qrbox: { width: 280, height: 120 },
+        aspectRatio: 1.3333333333,
+        formatsToSupport: fallbackScannerFormats()
+      },
+      async (decodedText) => {
+        if (scannerBusy) {
+          return;
+        }
+        scannerBusy = true;
+        try {
+          await handleDetectedBarcode(decodedText);
+        } finally {
+          scannerBusy = false;
+        }
+      },
+      () => {}
+    );
+  }
+
+  async function openScannerModal() {
     try {
-      scannerDetector = await buildBarcodeDetector();
-      scannerStream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: "environment" },
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
-        audio: false
-      });
-      if (!scannerVideo) {
-        throw new Error("Scanner preview is not available.");
+      if (canUseBarcodeScanner()) {
+        await openNativeScannerModal();
+        return;
       }
-      scannerVideo.srcObject = scannerStream;
-      await scannerVideo.play();
-      scannerActive = true;
-      if (scannerModal) {
-        scannerModal.hidden = false;
-      }
-      document.body.classList.add("scanner-open");
-      if (scannerStatus) {
-        scannerStatus.textContent = "Point the camera at a barcode to search the shared catalogue.";
-      }
-      scannerFrameHandle = window.requestAnimationFrame(scanBarcodeFrame);
+      await openFallbackScannerModal();
     } catch (error) {
-      closeScannerModal();
+      await closeScannerModal();
       window.ItemTracker?.toast(error.message || "Could not open the barcode scanner");
     }
   }
@@ -922,12 +1038,7 @@
   }
 
   if (scanBarcodeButton) {
-    if (!canUseBarcodeScanner()) {
-      scanBarcodeButton.disabled = true;
-      scanBarcodeButton.title = "Barcode scanning needs a supported mobile browser.";
-    } else {
-      scanBarcodeButton.addEventListener("click", openScannerModal);
-    }
+    scanBarcodeButton.addEventListener("click", openScannerModal);
   }
 
   document.querySelectorAll(".catalog-filter-input").forEach((input) => {

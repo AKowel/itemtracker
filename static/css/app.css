@@ -660,6 +660,19 @@ body.scanner-open {
   background: linear-gradient(180deg, #0f1826, #1c2c43);
 }
 
+.scanner-modal__fallback {
+  width: 100%;
+  min-height: 360px;
+  border-radius: 22px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, #0f1826, #1c2c43);
+}
+
+.scanner-modal__fallback[hidden] {
+  display: none;
+}
+
 .scanner-modal__status {
   margin: 0;
   color: var(--text-soft);
