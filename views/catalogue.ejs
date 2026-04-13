@@ -69,7 +69,7 @@
       <div>
         <p class="eyebrow">Lookup</p>
         <h2>Filter catalogue and manage photos</h2>
-        <p>Use several search filters together, preview reference images in a lightbox, and stage mobile photos inside each product card until you finalise the upload.</p>
+        <p>Use several search filters together, scan product or box barcodes, preview reference images in a lightbox, and stage mobile photos inside each product card until you finalise the upload.</p>
       </div>
       <span class="chip" id="resultCountChip">0 matches</span>
     </div>
@@ -101,6 +101,7 @@
           <input type="checkbox" id="warehouseActiveOnly">
           <span>Only active in warehouse</span>
         </label>
+        <button type="button" class="ghost-button" id="scanBarcodeButton">Scan Barcode</button>
         <button type="button" id="searchButton">Search</button>
         <button type="button" class="ghost-button" id="clearButton">Clear</button>
       </div>
@@ -124,6 +125,20 @@
     </figcaption>
   </figure>
   <button type="button" class="lightbox__nav" id="lightboxNext" aria-label="Next image">Next</button>
+</div>
+
+<div id="barcodeScanner" class="scanner-modal" hidden>
+  <div class="scanner-modal__panel">
+    <div class="scanner-modal__head">
+      <div>
+        <p class="eyebrow">Barcode Scanner</p>
+        <strong>Scan a product or box barcode</strong>
+      </div>
+      <button type="button" class="ghost-button scanner-modal__close" id="scannerCloseButton">Close</button>
+    </div>
+    <video id="scannerVideo" class="scanner-modal__video" playsinline muted></video>
+    <p class="scanner-modal__status" id="scannerStatus">Point the camera at a barcode to search the shared catalogue.</p>
+  </div>
 </div>
 
 <script>

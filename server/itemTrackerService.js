@@ -10,10 +10,12 @@ const { PocketBaseClient, PocketBaseError } = require("./pocketbaseClient");
 const USERS_COLLECTION = "users";
 const SNAPSHOT_COLLECTION = "item_catalog_snapshots";
 const IMAGE_COLLECTION = "item_catalog_images";
+const BARCODE_SNAPSHOT_COLLECTION = "item_catalog_barcode_snapshots";
 const WAREHOUSE_SNAPSHOT_COLLECTION = "warehouse_binloc_snapshots";
 const DEFAULT_CLIENT_CODE = "FANDMKET";
 const MAX_RESULTS = 60;
 const IMAGE_CACHE_TTL_MS = 60 * 1000;
+const BARCODE_CACHE_TTL_MS = 60 * 1000;
 const WAREHOUSE_CACHE_TTL_MS = 60 * 1000;
 
 function pbFilterLiteral(value) {
@@ -117,6 +119,82 @@ function fieldScore(value, phrase, exactScore, prefixScore, containsScore) {
   return 0;
 }
 
+function normalizeBarcodeValue(value) {
+  const text = cleanValue(value);
+  return /\d/.test(text) ? text : "";
+}
+
+function mergeBarcodeValues(...values) {
+  const merged = [];
+  const seen = new Set();
+
+  const consume = (rawValue) => {
+    if (Array.isArray(rawValue)) {
+      rawValue.forEach(consume);
+      return;
+    }
+    const value = normalizeBarcodeValue(rawValue);
+    if (!value || seen.has(value)) {
+      return;
+    }
+    seen.add(value);
+    merged.push(value);
+  };
+
+  values.forEach(consume);
+  return merged;
+}
+
+function itemBarcodeList(item) {
+  if (!item || typeof item !== "object") {
+    return [];
+  }
+  return mergeBarcodeValues(item.barcode, item.barcodes || []);
+}
+
+function buildCatalogSearchText(item, barcodes = null) {
+  const barcodeList = Array.isArray(barcodes) ? mergeBarcodeValues(barcodes) : itemBarcodeList(item);
+  return [
+    cleanValue(item?.sku),
+    barcodeList.join(" "),
+    cleanValue(item?.description),
+    cleanValue(item?.description_short),
+    cleanValue(item?.size),
+    cleanValue(item?.color)
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toUpperCase();
+}
+
+function barcodeSnapshotMeta(record, source = "pocketbase") {
+  if (!record) {
+    return {
+      available: false,
+      source,
+      client_code: DEFAULT_CLIENT_CODE,
+      snapshot_date: "",
+      row_count: 0,
+      source_row_count: 0,
+      barcode_count: 0,
+      duplicate_barcode_count: 0,
+      uploaded_at: ""
+    };
+  }
+  return {
+    available: true,
+    source,
+    client_code: record.client_code || DEFAULT_CLIENT_CODE,
+    snapshot_date: record.snapshot_date || "",
+    row_count: Number(record.row_count || 0),
+    source_row_count: Number(record.source_row_count || 0),
+    barcode_count: Number(record.barcode_count || 0),
+    duplicate_barcode_count: Number(record.duplicate_barcode_count || 0),
+    uploaded_at: record.uploaded_at || "",
+    source_name: record.source_name || ""
+  };
+}
+
 function warehouseSnapshotMeta(record, source = "pocketbase") {
   if (!record) {
     return {
@@ -150,6 +228,7 @@ class ItemTrackerService {
     });
     this.snapshotCache = new Map();
     this.imageCache = new Map();
+    this.barcodeSnapshotCache = new Map();
     this.warehouseSnapshotCache = null;
   }
 
@@ -214,6 +293,20 @@ class ItemTrackerService {
       { name: "image", type: "file", required: true, maxSelect: 1, maxSize: 15728640 }
     ]);
     report.push(`${IMAGE_COLLECTION} ready`);
+
+    await this.ensureCollection(BARCODE_SNAPSHOT_COLLECTION, [
+      { name: "client_code", type: "text", required: true, max: 64 },
+      { name: "snapshot_date", type: "text", required: true, max: 32 },
+      { name: "row_count", type: "number", required: false, min: 0, onlyInt: true },
+      { name: "source_row_count", type: "number", required: false, min: 0, onlyInt: true },
+      { name: "barcode_count", type: "number", required: false, min: 0, onlyInt: true },
+      { name: "duplicate_barcode_count", type: "number", required: false, min: 0, onlyInt: true },
+      { name: "uploaded_at", type: "text", required: false, max: 64 },
+      { name: "source_synced_at", type: "text", required: false, max: 64 },
+      { name: "source_name", type: "text", required: false, max: 255 },
+      { name: "snapshot_file", type: "file", required: true, maxSelect: 1, maxSize: 52428800 }
+    ]);
+    report.push(`${BARCODE_SNAPSHOT_COLLECTION} ready`);
 
     await this.ensureCollection(WAREHOUSE_SNAPSHOT_COLLECTION, [
       { name: "warehouse_code", type: "text", required: true, max: 64 },
@@ -335,9 +428,9 @@ class ItemTrackerService {
 
   scoreItem(item, primaryPhrase, phrases, terms) {
     const sku = String(item.sku || "").toUpperCase();
-    const barcode = String(item.barcode || "").toUpperCase();
+    const barcodes = itemBarcodeList(item).map((value) => String(value || "").toUpperCase());
     const description = String(item.description || "").toUpperCase();
-    const searchText = String(item.search_text || "").toUpperCase();
+    const searchText = String(item.search_text || buildCatalogSearchText(item)).toUpperCase();
 
     if (!terms.length) {
       return 0;
@@ -350,7 +443,9 @@ class ItemTrackerService {
     for (const phrase of phrases) {
       const weight = phrase === primaryPhrase ? 1 : 0.58;
       score += fieldScore(sku, phrase, Math.round(12000 * weight), Math.round(9000 * weight), Math.round(7000 * weight));
-      score += fieldScore(barcode, phrase, Math.round(10500 * weight), Math.round(7600 * weight), Math.round(6100 * weight));
+      score += Math.max(
+        ...[0, ...barcodes.map((barcode) => fieldScore(barcode, phrase, Math.round(10500 * weight), Math.round(7600 * weight), Math.round(6100 * weight)))]
+      );
       score += fieldScore(description, phrase, Math.round(8600 * weight), Math.round(5200 * weight), Math.round(3600 * weight));
     }
 
@@ -411,6 +506,101 @@ class ItemTrackerService {
     };
     this.imageCache.set(cacheKey, payload);
     return payload;
+  }
+
+  async getLatestBarcodeSnapshotRecord(clientCode = DEFAULT_CLIENT_CODE) {
+    const response = await this.pb.listRecords(BARCODE_SNAPSHOT_COLLECTION, {
+      filterExpr: `client_code=${pbFilterLiteral(clientCode)}`,
+      sort: "-snapshot_date,-uploaded_at",
+      page: 1,
+      perPage: 1
+    });
+    return response.items?.[0] || null;
+  }
+
+  async loadBarcodeSnapshot(clientCode = DEFAULT_CLIENT_CODE, forceRefresh = false) {
+    const cacheKey = String(clientCode || DEFAULT_CLIENT_CODE);
+    const cached = this.barcodeSnapshotCache.get(cacheKey);
+    const now = Date.now();
+    if (!forceRefresh && cached && now - cached.loadedAt < BARCODE_CACHE_TTL_MS) {
+      return cached;
+    }
+
+    const record = await this.getLatestBarcodeSnapshotRecord(clientCode);
+    if (!record) {
+      const payload = {
+        loadedAt: now,
+        snapshot: null,
+        meta: barcodeSnapshotMeta(null, "none")
+      };
+      this.barcodeSnapshotCache.set(cacheKey, payload);
+      return payload;
+    }
+
+    const fileName = recordFileName(record, "snapshot_file");
+    if (!fileName) {
+      throw new PocketBaseError("Barcode snapshot file is missing.", 500);
+    }
+
+    const response = await this.pb.proxyFile(
+      record.collectionId || record.collectionName || BARCODE_SNAPSHOT_COLLECTION,
+      record.id,
+      fileName
+    );
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const jsonBuffer = fileName.toLowerCase().endsWith(".gz") ? zlib.gunzipSync(buffer) : buffer;
+    const snapshot = JSON.parse(jsonBuffer.toString("utf-8"));
+    const payload = {
+      loadedAt: now,
+      snapshot,
+      meta: barcodeSnapshotMeta(record, "pocketbase")
+    };
+    this.barcodeSnapshotCache.set(cacheKey, payload);
+    return payload;
+  }
+
+  buildBarcodeMap(barcodeSnapshot) {
+    const barcodeMap = new Map();
+    const rows = barcodeSnapshot?.mappings || barcodeSnapshot?.items || [];
+    for (const row of rows) {
+      const sku = normalizeSku(row?.sku || row?.item_sku || row?.BIITEM || row?.ITITEM);
+      const barcodes = mergeBarcodeValues(row?.barcode, row?.barcodes || []);
+      if (!sku || !barcodes.length) {
+        continue;
+      }
+      barcodeMap.set(sku, mergeBarcodeValues(barcodeMap.get(sku) || [], barcodes));
+    }
+    return barcodeMap;
+  }
+
+  applyBarcodeSnapshot(snapshot, barcodeSnapshot = null) {
+    if (!snapshot || typeof snapshot !== "object") {
+      return snapshot;
+    }
+
+    const signature = barcodeSnapshot
+      ? [
+          cleanValue(barcodeSnapshot.client_code),
+          cleanValue(barcodeSnapshot.snapshot_date),
+          cleanValue(barcodeSnapshot.generated_at),
+          cleanValue(barcodeSnapshot.source_synced_at),
+          String(barcodeSnapshot.row_count || "")
+        ].join("::")
+      : "";
+    if (snapshot._barcode_signature === signature) {
+      return snapshot;
+    }
+
+    const barcodeMap = this.buildBarcodeMap(barcodeSnapshot);
+    for (const item of snapshot.items || []) {
+      const sku = normalizeSku(item?.sku);
+      const barcodes = mergeBarcodeValues(item?.barcode, item?.barcodes || [], barcodeMap.get(sku) || []);
+      item.barcodes = barcodes;
+      item.barcode = barcodes[0] || "";
+      item.search_text = buildCatalogSearchText(item, barcodes);
+    }
+    snapshot._barcode_signature = signature;
+    return snapshot;
   }
 
   async getLatestWarehouseSnapshotRecord() {
@@ -538,6 +728,13 @@ class ItemTrackerService {
       return { rows: [], meta };
     }
 
+    try {
+      const barcodeState = await this.loadBarcodeSnapshot(clientCode);
+      this.applyBarcodeSnapshot(snapshot, barcodeState.snapshot);
+    } catch (error) {
+      this.applyBarcodeSnapshot(snapshot, null);
+    }
+
     const primaryPhrase = cleanText(query).toUpperCase() || phrases[0] || "";
     const terms = splitFilterTerms(phrases);
     const imageState = await this.loadImageIndex(clientCode);
@@ -575,8 +772,15 @@ class ItemTrackerService {
 
     const rows = scored.slice(0, limit).map((entry) => {
       const { search_text: searchText, ...rest } = entry[2];
+      const barcodes = mergeBarcodeValues(rest.barcode, rest.barcodes || []);
+      const matchedBarcodes = barcodes.filter((barcode) =>
+        phrases.some((phrase) => phrase && String(barcode || "").toUpperCase().includes(phrase))
+      );
       return {
         ...rest,
+        barcodes,
+        barcode: barcodes[0] || "",
+        matched_barcodes: matchedBarcodes,
         has_images: Boolean(entry[3]),
         warehouse_active: Boolean(entry[4])
       };
@@ -662,22 +866,27 @@ class ItemTrackerService {
               sku;
             const descriptionShort =
               cleanValue(`${cleanValue(row.ITDSC1)} ${cleanValue(row.ITDSC2)}`) || description;
-            const barcodeRaw = cleanValue(row.ITBARC);
-            const barcode = /\d/.test(barcodeRaw) ? barcodeRaw : "";
+            const barcode = normalizeBarcodeValue(row.ITBARC);
+            const barcodes = barcode ? [barcode] : [];
             const item = {
               sku,
               description,
               description_short: descriptionShort,
               barcode,
+              barcodes,
               size: cleanValue(row.ITSIZE),
               color: cleanValue(row.ITCOLR),
               active: cleanValue(row.ITACT).toUpperCase() === "Y",
               created_at: cleanValue(row.CREATE_TIMESTAMP),
               changed_at: cleanValue(row.CHANGE_TIMESTAMP),
-              search_text: [sku, barcode, description, descriptionShort, cleanValue(row.ITSIZE), cleanValue(row.ITCOLR)]
-                .filter(Boolean)
-                .join(" ")
-                .toUpperCase()
+              search_text: buildCatalogSearchText({
+                sku,
+                description,
+                description_short: descriptionShort,
+                barcodes,
+                size: cleanValue(row.ITSIZE),
+                color: cleanValue(row.ITCOLR)
+              }, barcodes)
             };
 
             const existing = itemsBySku.get(sku);

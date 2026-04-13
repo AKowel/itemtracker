@@ -398,6 +398,17 @@ input[type="text"] {
   align-items: flex-start;
 }
 
+.result-card__barcode-line {
+  display: grid;
+  gap: 4px;
+  color: var(--text-soft);
+  font-size: 0.94rem;
+}
+
+.result-card__barcode-line strong {
+  color: var(--brand-strong);
+}
+
 .result-badge {
   display: inline-flex;
   align-items: center;
@@ -595,6 +606,65 @@ input[type="text"] {
   font-weight: 800;
 }
 
+body.scanner-open {
+  overflow: hidden;
+}
+
+.scanner-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1250;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(14, 24, 38, 0.82);
+  backdrop-filter: blur(12px);
+}
+
+.scanner-modal[hidden] {
+  display: none;
+}
+
+.scanner-modal__panel {
+  width: min(560px, 100%);
+  display: grid;
+  gap: 16px;
+  padding: 20px;
+  border-radius: 28px;
+  background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(241, 247, 255, 0.9));
+  box-shadow: var(--shadow);
+}
+
+.scanner-modal__head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.scanner-modal__head strong {
+  font-size: 1.15rem;
+  color: var(--brand-strong);
+}
+
+.scanner-modal__close {
+  align-self: center;
+}
+
+.scanner-modal__video {
+  width: 100%;
+  aspect-ratio: 4 / 5;
+  object-fit: cover;
+  border-radius: 22px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, #0f1826, #1c2c43);
+}
+
+.scanner-modal__status {
+  margin: 0;
+  color: var(--text-soft);
+}
+
 body.lightbox-open {
   overflow: hidden;
 }
@@ -758,6 +828,15 @@ body.lightbox-open {
 
   .lightbox__nav {
     min-width: 140px;
+  }
+
+  .scanner-modal {
+    padding: 16px;
+  }
+
+  .scanner-modal__panel {
+    padding: 16px;
+    border-radius: 24px;
   }
 
   .hero-card,
