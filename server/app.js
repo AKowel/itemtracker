@@ -228,7 +228,7 @@ async function createApp() {
 
   app.get(
     "/api/catalog/summary",
-    requireLoginApi,
+    requireAdminApi,
     asyncHandler(async (req, res) => {
       const summary = await service.getCatalogSummary();
       return res.json({

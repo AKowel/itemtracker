@@ -232,6 +232,10 @@ button:hover {
   gap: 14px;
 }
 
+.metrics-grid--admin {
+  margin-top: 0;
+}
+
 .metric-card {
   display: grid;
   gap: 8px;
@@ -726,6 +730,10 @@ body.lightbox-open {
 
   .metrics-grid {
     grid-template-columns: 1fr;
+  }
+
+  .metrics-grid--admin {
+    display: none;
   }
 
   .search-actions,

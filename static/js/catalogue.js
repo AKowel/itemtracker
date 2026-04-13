@@ -27,6 +27,7 @@
   const metaImportedChip = document.getElementById("metaImportedChip");
   const importForm = document.getElementById("importForm");
   const importStatusChip = document.getElementById("importStatusChip");
+  const summaryGrid = document.getElementById("summaryGrid");
   const capturedSkuMetric = document.getElementById("capturedSkuMetric");
   const capturedSkuMetricNote = document.getElementById("capturedSkuMetricNote");
   const itemfileCoverageMetric = document.getElementById("itemfileCoverageMetric");
@@ -141,7 +142,14 @@
     }
   }
 
+  function canLoadSummary() {
+    return Boolean(currentUser?.isAdmin && summaryGrid);
+  }
+
   async function refreshSummary() {
+    if (!canLoadSummary()) {
+      return;
+    }
     try {
       const response = await fetch("/api/catalog/summary", { cache: "no-store" });
       const data = await response.json().catch(() => ({}));
@@ -797,5 +805,7 @@
   });
 
   setMeta(catalogMeta);
-  refreshSummary();
+  if (canLoadSummary()) {
+    refreshSummary();
+  }
 })();

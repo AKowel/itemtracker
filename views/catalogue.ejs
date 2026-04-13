@@ -19,28 +19,30 @@
     </div>
   </section>
 
-  <section class="metrics-grid" id="summaryGrid">
-    <article class="metric-card">
-      <p class="eyebrow">Captured</p>
-      <strong id="capturedSkuMetric">0</strong>
-      <span id="capturedSkuMetricNote">SKUs with at least one image</span>
-    </article>
-    <article class="metric-card">
-      <p class="eyebrow">Item File Coverage</p>
-      <strong id="itemfileCoverageMetric">0%</strong>
-      <span id="itemfileCoverageMetricNote">0 / 0 SKUs from the shared item file</span>
-    </article>
-    <article class="metric-card">
-      <p class="eyebrow">Warehouse Coverage</p>
-      <strong id="warehouseCoverageMetric">0%</strong>
-      <span id="warehouseCoverageMetricNote">0 / 0 active warehouse SKUs captured</span>
-    </article>
-    <article class="metric-card">
-      <p class="eyebrow">Warehouse Snapshot</p>
-      <strong id="warehouseSnapshotMetric">Not synced</strong>
-      <span id="warehouseSnapshotMetricNote">Waiting for the latest PI-App warehouse upload</span>
-    </article>
-  </section>
+  <% if (currentUser && currentUser.isAdmin) { %>
+    <section class="metrics-grid metrics-grid--admin" id="summaryGrid">
+      <article class="metric-card">
+        <p class="eyebrow">Captured</p>
+        <strong id="capturedSkuMetric">0</strong>
+        <span id="capturedSkuMetricNote">SKUs with at least one image</span>
+      </article>
+      <article class="metric-card">
+        <p class="eyebrow">Item File Coverage</p>
+        <strong id="itemfileCoverageMetric">0%</strong>
+        <span id="itemfileCoverageMetricNote">0 / 0 SKUs from the shared item file</span>
+      </article>
+      <article class="metric-card">
+        <p class="eyebrow">Warehouse Coverage</p>
+        <strong id="warehouseCoverageMetric">0%</strong>
+        <span id="warehouseCoverageMetricNote">0 / 0 active warehouse SKUs captured</span>
+      </article>
+      <article class="metric-card">
+        <p class="eyebrow">Warehouse Snapshot</p>
+        <strong id="warehouseSnapshotMetric">Not synced</strong>
+        <span id="warehouseSnapshotMetricNote">Waiting for the latest PI-App warehouse upload</span>
+      </article>
+    </section>
+  <% } %>
 
   <% if (currentUser && currentUser.isAdmin) { %>
     <section class="panel-card">
