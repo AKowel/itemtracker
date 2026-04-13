@@ -54,6 +54,7 @@
   const IMAGE_MAX_DIMENSION = 1600;
   const IMAGE_TARGET_BYTES = 450000;
   const IMAGE_QUALITY_STEPS = [0.8, 0.72, 0.64, 0.56, 0.48, 0.4];
+  const FALLBACK_SCANNER_SCRIPT = "/static/vendor/html5-qrcode.min.js";
   let scannerStream = null;
   let scannerDetector = null;
   let scannerFrameHandle = 0;
@@ -140,7 +141,7 @@
     }
     scannerScriptPromise = new Promise((resolve, reject) => {
       const script = document.createElement("script");
-      script.src = "https://unpkg.com/html5-qrcode@2.3.8/minified/html5-qrcode.min.js";
+      script.src = FALLBACK_SCANNER_SCRIPT;
       script.async = true;
       script.onload = () => resolve(window.Html5Qrcode);
       script.onerror = () => reject(new Error("Could not load the mobile barcode scanner library."));
