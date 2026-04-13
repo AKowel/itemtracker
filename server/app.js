@@ -211,7 +211,10 @@ async function createApp() {
         req.query.desc2,
         req.query.desc3
       );
-      const result = await service.searchCatalog(query, undefined, limit, filters);
+      const result = await service.searchCatalog(query, undefined, limit, filters, {
+        hasImagesOnly: String(req.query.has_images || "").trim().toLowerCase() === "true",
+        warehouseActiveOnly: String(req.query.warehouse_active || "").trim().toLowerCase() === "true"
+      });
       return res.json({
         ok: true,
         query,
@@ -219,6 +222,18 @@ async function createApp() {
         total: result.rows.length,
         rows: result.rows,
         meta: result.meta
+      });
+    })
+  );
+
+  app.get(
+    "/api/catalog/summary",
+    requireLoginApi,
+    asyncHandler(async (req, res) => {
+      const summary = await service.getCatalogSummary();
+      return res.json({
+        ok: true,
+        summary
       });
     })
   );

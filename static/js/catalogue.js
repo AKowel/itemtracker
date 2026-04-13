@@ -19,12 +19,22 @@
   const descThreeInput = document.getElementById("catalogDescThree");
   const searchButton = document.getElementById("searchButton");
   const clearButton = document.getElementById("clearButton");
+  const hasImagesOnlyInput = document.getElementById("hasImagesOnly");
+  const warehouseActiveOnlyInput = document.getElementById("warehouseActiveOnly");
   const resultCountChip = document.getElementById("resultCountChip");
   const metaSourceChip = document.getElementById("metaSourceChip");
   const metaCountChip = document.getElementById("metaCountChip");
   const metaImportedChip = document.getElementById("metaImportedChip");
   const importForm = document.getElementById("importForm");
   const importStatusChip = document.getElementById("importStatusChip");
+  const capturedSkuMetric = document.getElementById("capturedSkuMetric");
+  const capturedSkuMetricNote = document.getElementById("capturedSkuMetricNote");
+  const itemfileCoverageMetric = document.getElementById("itemfileCoverageMetric");
+  const itemfileCoverageMetricNote = document.getElementById("itemfileCoverageMetricNote");
+  const warehouseCoverageMetric = document.getElementById("warehouseCoverageMetric");
+  const warehouseCoverageMetricNote = document.getElementById("warehouseCoverageMetricNote");
+  const warehouseSnapshotMetric = document.getElementById("warehouseSnapshotMetric");
+  const warehouseSnapshotMetricNote = document.getElementById("warehouseSnapshotMetricNote");
   const lightbox = document.getElementById("imageLightbox");
   const lightboxImage = document.getElementById("lightboxImage");
   const lightboxTitle = document.getElementById("lightboxTitle");
@@ -90,11 +100,63 @@
       String(descTwoInput?.value || "").trim(),
       String(descThreeInput?.value || "").trim()
     ].filter(Boolean);
+    const hasImagesOnly = Boolean(hasImagesOnlyInput?.checked);
+    const warehouseActiveOnly = Boolean(warehouseActiveOnlyInput?.checked);
     return {
       sku,
       terms,
-      hasFilters: Boolean(sku || terms.length)
+      hasImagesOnly,
+      warehouseActiveOnly,
+      hasFilters: Boolean(sku || terms.length || hasImagesOnly || warehouseActiveOnly)
     };
+  }
+
+  function applySummary(summary) {
+    const data = summary || {};
+    if (capturedSkuMetric) {
+      capturedSkuMetric.textContent = Number(data.captured_sku_count || 0).toLocaleString();
+    }
+    if (capturedSkuMetricNote) {
+      capturedSkuMetricNote.textContent = `${Number(data.image_record_count || 0).toLocaleString()} uploaded photo${Number(data.image_record_count || 0) === 1 ? "" : "s"} across the shared catalogue`;
+    }
+    if (itemfileCoverageMetric) {
+      itemfileCoverageMetric.textContent = `${Number(data.captured_vs_itemfile_percent || 0).toFixed(1)}%`;
+    }
+    if (itemfileCoverageMetricNote) {
+      itemfileCoverageMetricNote.textContent = `${Number(data.captured_itemfile_sku_count || 0).toLocaleString()} / ${Number(data.itemfile_sku_count || 0).toLocaleString()} SKUs from the shared item file`;
+    }
+    if (warehouseCoverageMetric) {
+      warehouseCoverageMetric.textContent = `${Number(data.captured_vs_warehouse_percent || 0).toFixed(1)}%`;
+    }
+    if (warehouseCoverageMetricNote) {
+      warehouseCoverageMetricNote.textContent = `${Number(data.captured_active_sku_count || 0).toLocaleString()} / ${Number(data.warehouse_active_sku_count || 0).toLocaleString()} active warehouse SKUs captured`;
+    }
+    if (warehouseSnapshotMetric) {
+      warehouseSnapshotMetric.textContent = data.warehouse_snapshot_date || "Not synced";
+    }
+    if (warehouseSnapshotMetricNote) {
+      warehouseSnapshotMetricNote.textContent = data.warehouse_uploaded_at
+        ? `Latest PI-App warehouse upload at ${data.warehouse_uploaded_at}`
+        : "Waiting for the latest PI-App warehouse upload";
+    }
+  }
+
+  async function refreshSummary() {
+    try {
+      const response = await fetch("/api/catalog/summary", { cache: "no-store" });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Could not load metrics");
+      }
+      applySummary(data.summary || {});
+    } catch (error) {
+      if (warehouseSnapshotMetric) {
+        warehouseSnapshotMetric.textContent = "Unavailable";
+      }
+      if (warehouseSnapshotMetricNote) {
+        warehouseSnapshotMetricNote.textContent = error.message || "Could not load shared metrics";
+      }
+    }
   }
 
   function getPendingEntries(sku) {
@@ -180,6 +242,7 @@
           row.barcode ? `Barcode ${row.barcode}` : "",
           row.size ? `Size ${row.size}` : "",
           row.color ? `Color ${row.color}` : "",
+          row.warehouse_active ? "Active in warehouse" : "",
           `${images.length} photo${images.length === 1 ? "" : "s"}`
         ].filter(Boolean);
         return `
@@ -394,6 +457,8 @@
       params.set("limit", String(maxResults));
       if (state.sku) params.append("sku", state.sku);
       state.terms.forEach((term) => params.append("term", term));
+      if (state.hasImagesOnly) params.set("has_images", "true");
+      if (state.warehouseActiveOnly) params.set("warehouse_active", "true");
       const response = await fetch(`/api/catalog/search?${params.toString()}`, {
         cache: "no-store"
       });
@@ -607,6 +672,7 @@
       pendingUploads.delete(String(sku || ""));
       captionDrafts.delete(String(sku || ""));
       renderRows(latestRows);
+      await refreshSummary();
       window.ItemTracker?.toast(`${uploadedCount} photo${uploadedCount === 1 ? "" : "s"} uploaded for ${sku}`);
     } catch (error) {
       if (uploadedCount > 0) {
@@ -648,6 +714,7 @@
       }
       setMeta(data.meta || {});
       renderRows([]);
+      await refreshSummary();
       importForm.reset();
       if (importStatusChip) importStatusChip.textContent = "Import complete";
       setEmptyState("Shared workbook updated", "Search to load the latest imported items.");
@@ -668,6 +735,8 @@
       if (descOneInput) descOneInput.value = "";
       if (descTwoInput) descTwoInput.value = "";
       if (descThreeInput) descThreeInput.value = "";
+      if (hasImagesOnlyInput) hasImagesOnlyInput.checked = false;
+      if (warehouseActiveOnlyInput) warehouseActiveOnlyInput.checked = false;
       renderRows([]);
     });
   }
@@ -676,6 +745,15 @@
     input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
+        searchCatalog();
+      }
+    });
+  });
+
+  [hasImagesOnlyInput, warehouseActiveOnlyInput].forEach((input) => {
+    if (!input) return;
+    input.addEventListener("change", () => {
+      if (getSearchState().hasFilters) {
         searchCatalog();
       }
     });
@@ -719,4 +797,5 @@
   });
 
   setMeta(catalogMeta);
+  refreshSummary();
 })();

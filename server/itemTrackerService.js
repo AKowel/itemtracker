@@ -10,8 +10,11 @@ const { PocketBaseClient, PocketBaseError } = require("./pocketbaseClient");
 const USERS_COLLECTION = "users";
 const SNAPSHOT_COLLECTION = "item_catalog_snapshots";
 const IMAGE_COLLECTION = "item_catalog_images";
+const WAREHOUSE_SNAPSHOT_COLLECTION = "warehouse_binloc_snapshots";
 const DEFAULT_CLIENT_CODE = "FANDMKET";
 const MAX_RESULTS = 60;
+const IMAGE_CACHE_TTL_MS = 60 * 1000;
+const WAREHOUSE_CACHE_TTL_MS = 60 * 1000;
 
 function pbFilterLiteral(value) {
   if (value === null || value === undefined) {
@@ -114,6 +117,29 @@ function fieldScore(value, phrase, exactScore, prefixScore, containsScore) {
   return 0;
 }
 
+function warehouseSnapshotMeta(record, source = "pocketbase") {
+  if (!record) {
+    return {
+      available: false,
+      source,
+      warehouse_code: "",
+      snapshot_date: "",
+      row_count: 0,
+      active_sku_count: 0,
+      uploaded_at: ""
+    };
+  }
+  return {
+    available: true,
+    source,
+    warehouse_code: record.warehouse_code || "",
+    snapshot_date: record.snapshot_date || "",
+    row_count: Number(record.row_count || 0),
+    active_sku_count: Number(record.active_sku_count || 0),
+    uploaded_at: record.uploaded_at || ""
+  };
+}
+
 class ItemTrackerService {
   constructor(config) {
     this.config = config;
@@ -123,6 +149,8 @@ class ItemTrackerService {
       adminPassword: config.pocketbaseAdminPassword
     });
     this.snapshotCache = new Map();
+    this.imageCache = new Map();
+    this.warehouseSnapshotCache = null;
   }
 
   isAdminUser(user) {
@@ -186,6 +214,18 @@ class ItemTrackerService {
       { name: "image", type: "file", required: true, maxSelect: 1, maxSize: 15728640 }
     ]);
     report.push(`${IMAGE_COLLECTION} ready`);
+
+    await this.ensureCollection(WAREHOUSE_SNAPSHOT_COLLECTION, [
+      { name: "warehouse_code", type: "text", required: true, max: 64 },
+      { name: "snapshot_date", type: "text", required: true, max: 32 },
+      { name: "row_count", type: "number", required: false, min: 0, onlyInt: true },
+      { name: "active_sku_count", type: "number", required: false, min: 0, onlyInt: true },
+      { name: "uploaded_at", type: "text", required: false, max: 64 },
+      { name: "source_synced_at", type: "text", required: false, max: 64 },
+      { name: "client_summary_json", type: "json", required: false },
+      { name: "snapshot_file", type: "file", required: true, maxSelect: 1, maxSize: 104857600 }
+    ]);
+    report.push(`${WAREHOUSE_SNAPSHOT_COLLECTION} ready`);
 
     return report;
   }
@@ -323,30 +363,225 @@ class ItemTrackerService {
     return score;
   }
 
-  async searchCatalog(query = "", clientCode = DEFAULT_CLIENT_CODE, limit = MAX_RESULTS, filters = []) {
+  async loadImageIndex(clientCode = DEFAULT_CLIENT_CODE, forceRefresh = false) {
+    const cacheKey = String(clientCode || DEFAULT_CLIENT_CODE);
+    const cached = this.imageCache.get(cacheKey);
+    const now = Date.now();
+    if (!forceRefresh && cached && now - cached.loadedAt < IMAGE_CACHE_TTL_MS) {
+      return cached;
+    }
+
+    const items = await this.pb.listAllRecords(IMAGE_COLLECTION, {
+      filterExpr: `client_code=${pbFilterLiteral(clientCode)}`,
+      sort: "-uploaded_at",
+      perPage: 200
+    });
+    const imageMap = new Map();
+    const imageSkuSet = new Set();
+    let imageRecordCount = 0;
+    for (const row of items || []) {
+      const sku = normalizeSku(row.sku);
+      if (!sku) {
+        continue;
+      }
+      const fileName = recordFileName(row, "image");
+      if (!fileName) {
+        continue;
+      }
+      if (!imageMap.has(sku)) {
+        imageMap.set(sku, []);
+      }
+      imageMap.get(sku).push({
+        id: row.id,
+        caption: row.caption || "",
+        uploaded_at: row.uploaded_at || "",
+        url: `/files/${encodeURIComponent(row.id)}?collection=${encodeURIComponent(
+          row.collectionId || row.collectionName || IMAGE_COLLECTION
+        )}&name=${encodeURIComponent(fileName)}`
+      });
+      imageSkuSet.add(sku);
+      imageRecordCount += 1;
+    }
+
+    const payload = {
+      loadedAt: now,
+      imageMap,
+      imageSkuSet,
+      imageRecordCount
+    };
+    this.imageCache.set(cacheKey, payload);
+    return payload;
+  }
+
+  async getLatestWarehouseSnapshotRecord() {
+    const response = await this.pb.listRecords(WAREHOUSE_SNAPSHOT_COLLECTION, {
+      sort: "-snapshot_date,-uploaded_at",
+      page: 1,
+      perPage: 1
+    });
+    return response.items?.[0] || null;
+  }
+
+  async loadWarehouseSnapshot(forceRefresh = false) {
+    const now = Date.now();
+    if (
+      !forceRefresh &&
+      this.warehouseSnapshotCache &&
+      now - this.warehouseSnapshotCache.loadedAt < WAREHOUSE_CACHE_TTL_MS
+    ) {
+      return this.warehouseSnapshotCache;
+    }
+
+    const record = await this.getLatestWarehouseSnapshotRecord();
+    if (!record) {
+      const payload = {
+        loadedAt: now,
+        snapshot: null,
+        meta: warehouseSnapshotMeta(null, "none")
+      };
+      this.warehouseSnapshotCache = payload;
+      return payload;
+    }
+
+    const fileName = recordFileName(record, "snapshot_file");
+    if (!fileName) {
+      throw new PocketBaseError("Warehouse snapshot file is missing.", 500);
+    }
+
+    const response = await this.pb.proxyFile(
+      record.collectionId || record.collectionName || WAREHOUSE_SNAPSHOT_COLLECTION,
+      record.id,
+      fileName
+    );
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const jsonBuffer = fileName.toLowerCase().endsWith(".gz") ? zlib.gunzipSync(buffer) : buffer;
+    const snapshot = JSON.parse(jsonBuffer.toString("utf-8"));
+    const payload = {
+      loadedAt: now,
+      snapshot,
+      meta: warehouseSnapshotMeta(record, "pocketbase")
+    };
+    this.warehouseSnapshotCache = payload;
+    return payload;
+  }
+
+  buildWarehouseSkuSet(snapshot, clientCode = DEFAULT_CLIENT_CODE) {
+    const skuSet = new Set();
+    const targetClient = String(clientCode || DEFAULT_CLIENT_CODE).trim().toUpperCase();
+    for (const row of snapshot?.rows || []) {
+      const client = String(row?.Client || row?.client_code || "").trim().toUpperCase();
+      const sku = normalizeSku(row?.["Item SKU"] || row?.sku || row?.BLITEM);
+      const status = String(row?.Status || row?.status || row?.BLSTS || "").trim().toUpperCase();
+      if (!sku) {
+        continue;
+      }
+      if (targetClient && client && client !== targetClient) {
+        continue;
+      }
+      if (status && status !== "Y") {
+        continue;
+      }
+      skuSet.add(sku);
+    }
+    return skuSet;
+  }
+
+  async getCatalogSummary(clientCode = DEFAULT_CLIENT_CODE) {
+    const { snapshot, meta } = await this.loadSnapshot(clientCode);
+    const imageState = await this.loadImageIndex(clientCode);
+    let warehouseState = { snapshot: null, meta: warehouseSnapshotMeta(null, "none") };
+    try {
+      warehouseState = await this.loadWarehouseSnapshot();
+    } catch (error) {
+      warehouseState = { snapshot: null, meta: warehouseSnapshotMeta(null, "error") };
+    }
+
+    const itemSkus = new Set((snapshot?.items || []).map((item) => normalizeSku(item?.sku)).filter(Boolean));
+    const imageSkus = imageState.imageSkuSet || new Set();
+    const warehouseSkus = this.buildWarehouseSkuSet(warehouseState.snapshot, clientCode);
+
+    let capturedInItemfile = 0;
+    let capturedInWarehouse = 0;
+    for (const sku of imageSkus) {
+      if (itemSkus.has(sku)) {
+        capturedInItemfile += 1;
+      }
+      if (warehouseSkus.has(sku)) {
+        capturedInWarehouse += 1;
+      }
+    }
+
+    const itemfileSkuCount = itemSkus.size;
+    const warehouseActiveSkuCount = warehouseSkus.size;
+    return {
+      itemfile_sku_count: itemfileSkuCount,
+      captured_sku_count: imageSkus.size,
+      image_record_count: Number(imageState.imageRecordCount || 0),
+      captured_itemfile_sku_count: capturedInItemfile,
+      captured_vs_itemfile_percent: itemfileSkuCount ? Math.round((capturedInItemfile / itemfileSkuCount) * 1000) / 10 : 0,
+      warehouse_active_sku_count: warehouseActiveSkuCount,
+      captured_active_sku_count: capturedInWarehouse,
+      captured_vs_warehouse_percent: warehouseActiveSkuCount ? Math.round((capturedInWarehouse / warehouseActiveSkuCount) * 1000) / 10 : 0,
+      warehouse_snapshot_date: warehouseState.meta.snapshot_date || "",
+      warehouse_uploaded_at: warehouseState.meta.uploaded_at || "",
+      item_catalog_meta: meta,
+      warehouse_meta: warehouseState.meta
+    };
+  }
+
+  async searchCatalog(query = "", clientCode = DEFAULT_CLIENT_CODE, limit = MAX_RESULTS, filters = [], options = {}) {
     const { snapshot, meta } = await this.loadSnapshot(clientCode);
     const phrases = normalizeFilterPhrases(query, filters);
-    if (!snapshot || !phrases.length) {
+    const hasImagesOnly = Boolean(options?.hasImagesOnly);
+    const warehouseActiveOnly = Boolean(options?.warehouseActiveOnly);
+    if (!snapshot || (!phrases.length && !hasImagesOnly && !warehouseActiveOnly)) {
       return { rows: [], meta };
     }
 
-    const primaryPhrase = cleanText(query).toUpperCase() || phrases[0];
+    const primaryPhrase = cleanText(query).toUpperCase() || phrases[0] || "";
     const terms = splitFilterTerms(phrases);
+    const imageState = await this.loadImageIndex(clientCode);
+    const imageMap = imageState.imageMap || new Map();
+    let warehouseSkuSet = new Set();
+    try {
+      const warehouseState = await this.loadWarehouseSnapshot();
+      warehouseSkuSet = this.buildWarehouseSkuSet(warehouseState.snapshot, clientCode);
+    } catch (error) {
+      warehouseSkuSet = new Set();
+    }
     const scored = [];
     for (const item of snapshot.items || []) {
-      const score = this.scoreItem(item, primaryPhrase, phrases, terms);
+      const sku = normalizeSku(item?.sku);
+      const hasImages = imageMap.has(sku);
+      const warehouseActive = warehouseSkuSet.has(sku);
+      if (hasImagesOnly && !hasImages) {
+        continue;
+      }
+      if (warehouseActiveOnly && !warehouseActive) {
+        continue;
+      }
+      let score = phrases.length ? this.scoreItem(item, primaryPhrase, phrases, terms) : 100;
+      if (hasImages) {
+        score += 220 + Math.min(180, (imageMap.get(sku)?.length || 0) * 18);
+      }
+      if (warehouseActive) {
+        score += 180;
+      }
       if (score > 0) {
-        scored.push([score, item.sku || "", item]);
+        scored.push([score, item.sku || "", item, hasImages, warehouseActive]);
       }
     }
     scored.sort((a, b) => (b[0] - a[0]) || String(a[1]).localeCompare(String(b[1])));
 
     const rows = scored.slice(0, limit).map((entry) => {
       const { search_text: searchText, ...rest } = entry[2];
-      return { ...rest };
+      return {
+        ...rest,
+        has_images: Boolean(entry[3]),
+        warehouse_active: Boolean(entry[4])
+      };
     });
 
-    const imageMap = await this.listImagesForSkus(rows.map((row) => row.sku), clientCode);
     for (const row of rows) {
       row.images = imageMap.get(row.sku) || [];
       row.image_count = row.images.length;
@@ -356,41 +591,17 @@ class ItemTrackerService {
   }
 
   async listImagesForSkus(skus, clientCode = DEFAULT_CLIENT_CODE) {
+    const imageState = await this.loadImageIndex(clientCode);
+    const sourceMap = imageState.imageMap || new Map();
     const normalized = [...new Set((skus || []).map((sku) => normalizeSku(sku)).filter(Boolean))];
     const imageMap = new Map();
     if (!normalized.length) {
       return imageMap;
     }
 
-    for (let index = 0; index < normalized.length; index += 25) {
-      const chunk = normalized.slice(index, index + 25);
-      const skuFilter = chunk.map((sku) => `sku=${pbFilterLiteral(sku)}`).join(" || ");
-      const response = await this.pb.listRecords(IMAGE_COLLECTION, {
-        filterExpr: `client_code=${pbFilterLiteral(clientCode)} && (${skuFilter})`,
-        sort: "-uploaded_at",
-        page: 1,
-        perPage: 200
-      });
-      for (const row of response.items || []) {
-        const sku = normalizeSku(row.sku);
-        if (!sku) {
-          continue;
-        }
-        const fileName = recordFileName(row, "image");
-        if (!fileName) {
-          continue;
-        }
-        if (!imageMap.has(sku)) {
-          imageMap.set(sku, []);
-        }
-        imageMap.get(sku).push({
-          id: row.id,
-          caption: row.caption || "",
-          uploaded_at: row.uploaded_at || "",
-          url: `/files/${encodeURIComponent(row.id)}?collection=${encodeURIComponent(
-            row.collectionId || row.collectionName || IMAGE_COLLECTION
-          )}&name=${encodeURIComponent(fileName)}`
-        });
+    for (const sku of normalized) {
+      if (sourceMap.has(sku)) {
+        imageMap.set(sku, sourceMap.get(sku));
       }
     }
 
@@ -577,6 +788,7 @@ class ItemTrackerService {
       uploadedIds.push(record.id);
     }
 
+    this.imageCache.delete(String(clientCode || DEFAULT_CLIENT_CODE));
     const imageMap = await this.listImagesForSkus([normalizedSku], clientCode);
     return {
       sku: normalizedSku,
