@@ -1,0 +1,32 @@
+<header class="site-header">
+  <div class="site-header__inner">
+    <a href="/catalogue" class="brand-mark">
+      <span class="brand-mark__eyebrow">Shared</span>
+      <strong><%= appName %></strong>
+    </a>
+    <% if (currentUser) { %>
+      <div class="site-header__actions">
+        <div class="user-chip">
+          <span><%= currentUser.name %></span>
+          <strong><%= currentUser.isAdmin ? "Admin" : "User" %></strong>
+        </div>
+        <form action="/logout" method="post">
+          <button type="submit" class="ghost-button">Sign out</button>
+        </form>
+      </div>
+    <% } %>
+  </div>
+</header>
+
+<% if (bootstrapError) { %>
+  <div class="notice-banner notice-banner--error">
+    <strong>PocketBase bootstrap warning:</strong>
+    <span><%= bootstrapError %></span>
+  </div>
+<% } %>
+
+<% if (flash) { %>
+  <div class="notice-banner notice-banner--<%= flash.category === "error" ? "error" : "success" %>">
+    <span><%= flash.message %></span>
+  </div>
+<% } %>

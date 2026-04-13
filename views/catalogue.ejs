@@ -1,0 +1,76 @@
+<%- include("partials/head", { pageTitle, assetVersion }) %>
+<%- include("partials/header", { appName, currentUser, flash, bootstrapError }) %>
+
+<main class="page-shell">
+  <section class="hero-card">
+    <div class="hero-card__copy">
+      <p class="eyebrow">Shared Catalogue</p>
+      <h1>Search once, use everywhere</h1>
+      <p>The hosted app writes to the same PocketBase collections that the local PI-App refresh reads from, so imports and photos stay shared across both sides.</p>
+      <div class="hero-card__chips">
+        <span class="chip" id="metaSourceChip">Source: <%= catalogMeta.source || "none" %></span>
+        <span class="chip" id="metaCountChip"><%= Number(catalogMeta.row_count || 0).toLocaleString() %> items</span>
+        <% if (catalogMeta.imported_at) { %>
+          <span class="chip" id="metaImportedChip">Imported <%= catalogMeta.imported_at %></span>
+        <% } else { %>
+          <span class="chip" id="metaImportedChip">No import yet</span>
+        <% } %>
+      </div>
+    </div>
+  </section>
+
+  <% if (currentUser && currentUser.isAdmin) { %>
+    <section class="panel-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Admin Import</p>
+          <h2>Publish a new workbook snapshot</h2>
+          <p>Upload the latest client item file here and every refreshed PI-App machine will pick up the new shared catalogue.</p>
+        </div>
+        <span class="chip" id="importStatusChip">Idle</span>
+      </div>
+      <form id="importForm" class="import-form">
+        <label class="field">
+          <span>Workbook</span>
+          <input type="file" name="catalog_file" id="catalogFile" accept=".xlsx,.xlsm,.xltx,.xltm,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required>
+        </label>
+        <button type="submit">Upload Workbook</button>
+      </form>
+    </section>
+  <% } %>
+
+  <section class="panel-card">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Lookup</p>
+        <h2>Find by SKU or description</h2>
+        <p>Search the current shared snapshot and attach product photos from desktop or directly from a phone camera.</p>
+      </div>
+      <span class="chip" id="resultCountChip">0 matches</span>
+    </div>
+    <div class="search-row">
+      <label class="field field--grow">
+        <span>Search</span>
+        <input type="search" id="catalogQuery" placeholder="Try olive oil, 2037915, gift box...">
+      </label>
+      <button type="button" id="searchButton">Search</button>
+      <button type="button" class="ghost-button" id="clearButton">Clear</button>
+    </div>
+    <div class="empty-state" id="emptyState">
+      <strong><%= catalogMeta.available ? "Search to load catalogue items" : "No shared catalogue imported yet" %></strong>
+      <span><%= catalogMeta.available ? "Start with a SKU or a few description words." : "An admin needs to upload the workbook first." %></span>
+    </div>
+    <div id="resultsGrid" class="results-grid"></div>
+  </section>
+</main>
+
+<script>
+  window.ITEMTRACKER_BOOTSTRAP = <%- safeJson({
+    catalogMeta,
+    maxResults,
+    currentUser
+  }) %>;
+</script>
+<script src="/static/js/catalogue.js?v=<%= assetVersion %>"></script>
+
+<%- include("partials/footer", { assetVersion }) %>

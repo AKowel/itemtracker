@@ -1,0 +1,22 @@
+{
+  "name": "itemtracker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Shared item tracker for cons.axephotography.co.uk backed by PocketBase",
+  "main": "server.js",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "bootstrap": "node scripts/bootstrap-pocketbase.js"
+  },
+  "dependencies": {
+    "dotenv": "17.2.2",
+    "ejs": "3.1.10",
+    "express": "5.1.0",
+    "express-session": "^1.19.0",
+    "multer": "^2.0.2",
+    "exceljs": "^4.4.0"
+  }
+}

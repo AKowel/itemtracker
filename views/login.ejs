@@ -1,0 +1,31 @@
+<%- include("partials/head", { pageTitle, assetVersion }) %>
+
+<main class="auth-shell">
+  <section class="auth-card">
+    <div class="auth-card__copy">
+      <p class="eyebrow">cons.axephotography.co.uk</p>
+      <h1>Shared Item Tracker</h1>
+      <p>Use your existing PocketBase / PI-App account to search the shared SKU catalogue and upload product reference photos for every warehouse machine.</p>
+    </div>
+
+    <% if (flash) { %>
+      <div class="inline-alert <%= flash.category === "error" ? "inline-alert--error" : "inline-alert--success" %>">
+        <%= flash.message %>
+      </div>
+    <% } %>
+
+    <form action="/login" method="post" class="auth-form">
+      <label>
+        <span>Email</span>
+        <input type="email" name="email" required autocomplete="username">
+      </label>
+      <label>
+        <span>Password</span>
+        <input type="password" name="password" required autocomplete="current-password">
+      </label>
+      <button type="submit">Sign in</button>
+    </form>
+  </section>
+</main>
+
+<%- include("partials/footer", { assetVersion }) %>
