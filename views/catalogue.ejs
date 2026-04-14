@@ -11,7 +11,6 @@
       <p class="eyebrow">Shared Catalogue</p>
       <h1>Search once, use everywhere</h1>
       <div class="hero-card__chips">
-        <span class="chip" id="metaSourceChip">Source: <%= catalogMeta.source || "none" %></span>
         <span class="chip" id="metaCountChip"><%= Number(catalogMeta.row_count || 0).toLocaleString() %> items</span>
         <% if (catalogMeta.imported_at) { %>
           <span class="chip" id="metaImportedChip">Imported <%= catalogMeta.imported_at %></span>
