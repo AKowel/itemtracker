@@ -7,6 +7,30 @@ class PocketBaseError extends Error {
   }
 }
 
+const SUPERUSER_REQUIRED_MESSAGE =
+  "PocketBase superuser credentials are required. Set POCKETBASE_ADMIN_EMAIL and POCKETBASE_ADMIN_PASSWORD to a real PocketBase superuser account, then restart the app.";
+
+function looksLikeSuperuserError(error) {
+  if (!(error instanceof PocketBaseError)) {
+    return false;
+  }
+  const message = String(error.message || "").toLowerCase();
+  return (
+    error.statusCode === 403 ||
+    message.includes("only superusers can perform this action") ||
+    message.includes("only super admins can perform this action") ||
+    message.includes("superuser") ||
+    message.includes("super admin")
+  );
+}
+
+function normalizeAdminError(error) {
+  if (looksLikeSuperuserError(error)) {
+    return new PocketBaseError(SUPERUSER_REQUIRED_MESSAGE, error.statusCode || 403, error.payload);
+  }
+  return error;
+}
+
 class PocketBaseClient {
   constructor({ baseUrl, adminEmail, adminPassword }) {
     this.baseUrl = String(baseUrl || "").replace(/\/$/, "");
@@ -80,12 +104,17 @@ class PocketBaseClient {
       throw new PocketBaseError("PocketBase admin credentials are missing.", 500);
     }
 
-    const auth = await this._request("POST", "/api/collections/_superusers/auth-with-password", {
-      payload: {
-        identity: this.adminEmail,
-        password: this.adminPassword
-      }
-    });
+    let auth;
+    try {
+      auth = await this._request("POST", "/api/collections/_superusers/auth-with-password", {
+        payload: {
+          identity: this.adminEmail,
+          password: this.adminPassword
+        }
+      });
+    } catch (error) {
+      throw normalizeAdminError(error);
+    }
 
     if (!auth || !auth.token) {
       throw new PocketBaseError("PocketBase admin authentication did not return a token.", 500);
@@ -100,11 +129,25 @@ class PocketBaseClient {
     try {
       return await this._request(method, path, { ...options, token });
     } catch (error) {
-      if (error instanceof PocketBaseError && error.statusCode === 401) {
-        token = await this.authenticateAdmin(true);
-        return this._request(method, path, { ...options, token });
+      if (error instanceof PocketBaseError) {
+        const isAuthError =
+          error.statusCode === 401 ||
+          error.statusCode === 403 ||
+          (typeof error.message === "string" &&
+            (error.message.toLowerCase().includes("super admin") ||
+             error.message.toLowerCase().includes("token") ||
+             error.message.toLowerCase().includes("unauthorized")));
+        if (isAuthError) {
+          this.adminToken = null;
+          token = await this.authenticateAdmin(true);
+          try {
+            return await this._request(method, path, { ...options, token });
+          } catch (retryError) {
+            throw normalizeAdminError(retryError);
+          }
+        }
       }
-      throw error;
+      throw normalizeAdminError(error);
     }
   }
 

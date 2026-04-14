@@ -98,6 +98,11 @@
     return data;
   }
 
+  function renderLoadError(wrapper, message) {
+    if (!wrapper) return;
+    wrapper.innerHTML = '<p class="admin-empty">' + escapeHtml(message || "Could not load this section.") + "</p>";
+  }
+
   // ── Render sessions ───────────────────────────────────────────────────────
 
   function renderSessions(sessions) {
@@ -275,9 +280,7 @@
       var data = await apiFetch("/api/admin/deletion-queue");
       renderDeletionQueue(data.requests || []);
     } catch (err) {
-      if (deletionQueueWrap) {
-        deletionQueueWrap.innerHTML = '<p class="admin-empty">Could not load deletion queue.</p>';
-      }
+      renderLoadError(deletionQueueWrap, err.message || "Could not load deletion queue.");
     }
   }
 
@@ -286,19 +289,44 @@
   var cachedSessions = [];
 
   async function loadAll() {
-    try {
-      var [sessData, usersData, actData] = await Promise.all([
-        apiFetch("/api/admin/sessions"),
-        apiFetch("/api/admin/users"),
-        apiFetch("/api/admin/activity?limit=200")
-      ]);
-      cachedSessions = sessData.sessions || [];
+    var results = await Promise.allSettled([
+      apiFetch("/api/admin/sessions"),
+      apiFetch("/api/admin/users"),
+      apiFetch("/api/admin/activity?limit=200")
+    ]);
+
+    var sessionResult = results[0];
+    var usersResult = results[1];
+    var activityResult = results[2];
+    var loadErrors = [];
+
+    if (sessionResult.status === "fulfilled") {
+      cachedSessions = sessionResult.value.sessions || [];
       renderSessions(cachedSessions);
-      renderUsers(usersData.users || [], cachedSessions);
-      renderActivity(actData.log || []);
-    } catch (err) {
-      window.ItemTracker?.toast(err.message || "Could not load admin data", "error");
+    } else {
+      cachedSessions = [];
+      renderLoadError(sessionsTableWrap, sessionResult.reason?.message || "Could not load active sessions.");
+      loadErrors.push(sessionResult.reason?.message || "Could not load active sessions.");
     }
+
+    if (usersResult.status === "fulfilled") {
+      renderUsers(usersResult.value.users || [], cachedSessions);
+    } else {
+      renderLoadError(usersTableWrap, usersResult.reason?.message || "Could not load users.");
+      loadErrors.push(usersResult.reason?.message || "Could not load users.");
+    }
+
+    if (activityResult.status === "fulfilled") {
+      renderActivity(activityResult.value.log || []);
+    } else {
+      renderLoadError(activityTableWrap, activityResult.reason?.message || "Could not load activity.");
+      loadErrors.push(activityResult.reason?.message || "Could not load activity.");
+    }
+
+    if (loadErrors.length) {
+      window.ItemTracker?.toast(loadErrors[0], "error");
+    }
+
     await loadDeletionQueue();
   }
 

@@ -177,8 +177,8 @@ copy .env.example .env
 
 - `SESSION_SECRET`
 - `POCKETBASE_URL`
-- `POCKETBASE_ADMIN_EMAIL`
-- `POCKETBASE_ADMIN_PASSWORD`
+- `POCKETBASE_ADMIN_EMAIL` for a real PocketBase superuser account
+- `POCKETBASE_ADMIN_PASSWORD` for that same PocketBase superuser
 - `APP_BASE_URL`
 - optionally `ADMIN_EMAILS`
 

@@ -21,6 +21,14 @@ const IMAGE_CACHE_TTL_MS = 60 * 1000;
 const BARCODE_CACHE_TTL_MS = 60 * 1000;
 const WAREHOUSE_CACHE_TTL_MS = 60 * 1000;
 
+function isMissingCollectionError(error) {
+  if (!(error instanceof PocketBaseError)) {
+    return false;
+  }
+  const message = String(error.message || "").toLowerCase();
+  return error.statusCode === 404 || message.includes("not found");
+}
+
 function pbFilterLiteral(value) {
   if (value === null || value === undefined) {
     return "null";
@@ -1230,21 +1238,28 @@ class ItemTrackerService {
   }
 
   async getActivityLog(limit = 200) {
-    const response = await this.pb.listRecords(ACTIVITY_LOG_COLLECTION, {
-      sort: "-created",
-      page: 1,
-      perPage: Math.min(500, limit)
-    });
-    return (response.items || []).map((r) => ({
-      id: r.id,
-      user_id: r.user_id || "",
-      user_email: r.user_email || "",
-      user_name: r.user_name || "",
-      action: r.action || "",
-      detail: r.detail || {},
-      ip_address: r.ip_address || "",
-      created: r.created || ""
-    }));
+    try {
+      const response = await this.pb.listRecords(ACTIVITY_LOG_COLLECTION, {
+        sort: "-created",
+        page: 1,
+        perPage: Math.min(500, limit)
+      });
+      return (response.items || []).map((r) => ({
+        id: r.id,
+        user_id: r.user_id || "",
+        user_email: r.user_email || "",
+        user_name: r.user_name || "",
+        action: r.action || "",
+        detail: r.detail || {},
+        ip_address: r.ip_address || "",
+        created: r.created || ""
+      }));
+    } catch (error) {
+      if (isMissingCollectionError(error)) {
+        return [];
+      }
+      throw error;
+    }
   }
 
   async resetUserPassword(userId, newPassword) {
@@ -1335,23 +1350,30 @@ class ItemTrackerService {
   }
 
   async getDeletionQueue(clientCode = DEFAULT_CLIENT_CODE) {
-    const response = await this.pb.listRecords(DELETION_REQUESTS_COLLECTION, {
-      filterExpr: `status=${pbFilterLiteral("pending")}`,
-      sort: "-requested_at",
-      page: 1,
-      perPage: 200
-    });
-    return (response.items || []).map((r) => ({
-      id: r.id,
-      sku: r.sku || "",
-      image_id: r.image_id || "",
-      image_url: r.image_url || "",
-      image_caption: r.image_caption || "",
-      status: r.status || "pending",
-      requested_at: r.requested_at || "",
-      requested_by_email: r.requested_by_email || "",
-      requested_by_name: r.requested_by_name || ""
-    }));
+    try {
+      const response = await this.pb.listRecords(DELETION_REQUESTS_COLLECTION, {
+        filterExpr: `status=${pbFilterLiteral("pending")}`,
+        sort: "-requested_at",
+        page: 1,
+        perPage: 200
+      });
+      return (response.items || []).map((r) => ({
+        id: r.id,
+        sku: r.sku || "",
+        image_id: r.image_id || "",
+        image_url: r.image_url || "",
+        image_caption: r.image_caption || "",
+        status: r.status || "pending",
+        requested_at: r.requested_at || "",
+        requested_by_email: r.requested_by_email || "",
+        requested_by_name: r.requested_by_name || ""
+      }));
+    } catch (error) {
+      if (isMissingCollectionError(error)) {
+        return [];
+      }
+      throw error;
+    }
   }
 
   async approveDeletion(requestId, adminUser, clientCode = DEFAULT_CLIENT_CODE) {

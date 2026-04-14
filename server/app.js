@@ -464,8 +464,8 @@ async function createApp() {
     "/api/admin/deletion-queue",
     requireAdminApi,
     asyncHandler(async (req, res) => {
-      const queue = await service.getDeletionQueue();
-      return res.json({ ok: true, queue });
+      const requests = await service.getDeletionQueue();
+      return res.json({ ok: true, requests });
     })
   );
 
