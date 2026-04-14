@@ -794,6 +794,91 @@ class ItemTrackerService {
     return { rows, meta };
   }
 
+  async searchByLocation(location, clientCode = DEFAULT_CLIENT_CODE) {
+    const query = String(location || "").trim().toUpperCase();
+    if (!query) {
+      return { rows: [], meta: null };
+    }
+
+    const warehouseState = await this.loadWarehouseSnapshot();
+    const snapshot = warehouseState.snapshot;
+
+    if (!snapshot?.rows?.length) {
+      return { rows: [], meta: warehouseState.meta };
+    }
+
+    const targetClient = String(clientCode || DEFAULT_CLIENT_CODE).trim().toUpperCase();
+
+    // Find every row in the snapshot that belongs to this bin location
+    const matchingRows = [];
+    for (const row of snapshot.rows) {
+      const loc = String(row?.BLBINL || row?.["Bin Location"] || row?.bin_location || "").trim().toUpperCase();
+      if (loc !== query) continue;
+      const client = String(row?.BLCCOD || row?.Client || row?.client_code || "").trim().toUpperCase();
+      if (targetClient && client && client !== targetClient) continue;
+      matchingRows.push(row);
+    }
+
+    if (!matchingRows.length) {
+      return { rows: [], meta: warehouseState.meta };
+    }
+
+    // Collect unique SKUs while preserving the order they appear
+    const skusSeen = new Set();
+    const skus = [];
+    for (const row of matchingRows) {
+      const sku = normalizeSku(row?.BLITEM || row?.["Item SKU"] || row?.sku);
+      if (sku && !skusSeen.has(sku)) {
+        skusSeen.add(sku);
+        skus.push(sku);
+      }
+    }
+
+    // Pull descriptions from the catalogue snapshot when available
+    let catalogMap = new Map();
+    try {
+      const { snapshot: catSnapshot } = await this.loadSnapshot(clientCode);
+      for (const item of catSnapshot?.items || []) {
+        const sku = normalizeSku(item?.sku);
+        if (sku) catalogMap.set(sku, item);
+      }
+    } catch (_) {
+      // Catalogue snapshot unavailable — descriptions will fall back to ITDSC1
+    }
+
+    // Load images
+    const imageState = await this.loadImageIndex(clientCode);
+    const imageMap = imageState.imageMap || new Map();
+
+    const rows = skus.map((sku) => {
+      const catItem = catalogMap.get(sku) || null;
+      const images = imageMap.get(sku) || [];
+      const binRow = matchingRows.find(
+        (r) => normalizeSku(r?.BLITEM || r?.["Item SKU"] || r?.sku) === sku
+      );
+      return {
+        sku,
+        description: catItem?.description || String(binRow?.ITDSC1 || ""),
+        description_short: catItem?.description_short || "",
+        barcode: catItem?.barcode || "",
+        barcodes: catItem?.barcodes || [],
+        size: catItem?.size || "",
+        color: catItem?.color || "",
+        active: catItem?.active !== false,
+        images,
+        image_count: images.length,
+        has_images: images.length > 0,
+        warehouse_active: true,
+        matched_barcodes: [],
+        bin_location: String(binRow?.BLBINL || "").trim().toUpperCase(),
+        bin_qty: String(binRow?.BLQTY || "").trim() || null,
+        bin_status: String(binRow?.BLSTS || "").trim().toUpperCase()
+      };
+    });
+
+    return { rows, meta: warehouseState.meta };
+  }
+
   async listImagesForSkus(skus, clientCode = DEFAULT_CLIENT_CODE) {
     const imageState = await this.loadImageIndex(clientCode);
     const sourceMap = imageState.imageMap || new Map();

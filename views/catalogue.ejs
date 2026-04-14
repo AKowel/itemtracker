@@ -50,6 +50,26 @@
     <section class="panel-card">
       <div class="panel-head">
         <div>
+          <p class="eyebrow">Admin · Location Lookup</p>
+          <h2>Find SKU by bin location</h2>
+          <p>Enter a bin location to see which SKU is assigned there and manage its photos directly.</p>
+        </div>
+        <span class="chip" id="locationStatusChip">Not searched</span>
+      </div>
+      <form id="locationSearchForm" class="import-form">
+        <label class="field">
+          <span>Bin location</span>
+          <input type="search" id="locationQuery" placeholder="e.g. WF441002" autocomplete="off" spellcheck="false">
+        </label>
+        <button type="submit">Look Up</button>
+      </form>
+    </section>
+  <% } %>
+
+  <% if (currentUser && currentUser.isAdmin) { %>
+    <section class="panel-card">
+      <div class="panel-head">
+        <div>
           <p class="eyebrow">Admin Import</p>
           <h2>Publish a new workbook snapshot</h2>
           <p>Upload the latest client item file here and every refreshed PI-App machine will pick up the new shared catalogue.</p>

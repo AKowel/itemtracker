@@ -249,6 +249,19 @@ async function createApp() {
     })
   );
 
+  app.get(
+    "/api/catalog/location-search",
+    requireAdminApi,
+    asyncHandler(async (req, res) => {
+      const location = String(req.query.location || "").trim();
+      if (!location) {
+        return res.status(400).json({ ok: false, error: "Provide a bin location to search." });
+      }
+      const result = await service.searchByLocation(location);
+      return res.json({ ok: true, rows: result.rows || [], meta: result.meta || null, location });
+    })
+  );
+
   app.post(
     "/api/catalog/import",
     requireAdminApi,

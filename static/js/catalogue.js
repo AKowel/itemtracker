@@ -28,6 +28,9 @@
   const metaImportedChip = document.getElementById("metaImportedChip");
   const importForm = document.getElementById("importForm");
   const importStatusChip = document.getElementById("importStatusChip");
+  const locationSearchForm = document.getElementById("locationSearchForm");
+  const locationQuery = document.getElementById("locationQuery");
+  const locationStatusChip = document.getElementById("locationStatusChip");
   const summaryGrid = document.getElementById("summaryGrid");
   const capturedSkuMetric = document.getElementById("capturedSkuMetric");
   const capturedSkuMetricNote = document.getElementById("capturedSkuMetricNote");
@@ -1126,6 +1129,45 @@
     }
   }
 
+  async function searchByLocation(event) {
+    event.preventDefault();
+    const query = String(locationQuery?.value || "").trim().toUpperCase();
+    if (!query) {
+      window.ItemTracker?.toast("Enter a bin location first");
+      return;
+    }
+
+    if (locationStatusChip) locationStatusChip.textContent = "Searching…";
+
+    try {
+      const response = await fetch(`/api/catalog/location-search?location=${encodeURIComponent(query)}`);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data.error || "Could not search by location");
+      }
+
+      const rows = data.rows || [];
+      latestRows = rows;
+      renderRows(rows);
+
+      if (rows.length === 0) {
+        setEmptyState(
+          `No SKU found at ${query}`,
+          "That location is not in the current warehouse snapshot, or it has no active stock."
+        );
+        if (resultCountChip) resultCountChip.textContent = `Location: ${query} — 0 SKUs`;
+        if (locationStatusChip) locationStatusChip.textContent = "No results";
+      } else {
+        setEmptyState("", "", false);
+        if (resultCountChip) resultCountChip.textContent = `Location: ${query} — ${rows.length} SKU${rows.length === 1 ? "" : "s"}`;
+        if (locationStatusChip) locationStatusChip.textContent = `${rows.length} SKU${rows.length === 1 ? "" : "s"} found`;
+      }
+    } catch (error) {
+      if (locationStatusChip) locationStatusChip.textContent = "Error";
+      window.ItemTracker?.toast(error.message || "Could not search by location", "error");
+    }
+  }
+
   async function importWorkbook(event) {
     event.preventDefault();
     if (!importForm) return;
@@ -1198,6 +1240,10 @@
 
   if (currentUser?.isAdmin && importForm) {
     importForm.addEventListener("submit", importWorkbook);
+  }
+
+  if (currentUser?.isAdmin && locationSearchForm) {
+    locationSearchForm.addEventListener("submit", searchByLocation);
   }
 
   if (lightboxClose) {
