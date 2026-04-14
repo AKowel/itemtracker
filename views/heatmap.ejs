@@ -1,0 +1,125 @@
+<%- include("partials/head", { pageTitle, assetVersion }) %>
+<%- include("partials/header", { appName, currentUser, flash, bootstrapError }) %>
+
+<main class="page-shell heatmap-page">
+  <section class="hero-card heatmap-hero">
+    <div class="hero-card__copy">
+      <p class="eyebrow">Admin Only</p>
+      <h1>Picking Heatmap</h1>
+      <p>View live warehouse locations in 3D, colour them by pick activity, and click any location to inspect the current SKU, photos, and heat details.</p>
+      <div class="hero-card__chips">
+        <span class="chip" id="heatmapDateChip">Loading snapshots…</span>
+        <span class="chip" id="heatmapLocationChip">0 locations</span>
+        <span class="chip" id="heatmapPickChip">0 picks</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel-card heatmap-toolbar-card">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Controls</p>
+        <h2>Scene Filters</h2>
+        <p>Choose a published pick snapshot date and narrow the scene to the most useful locations.</p>
+      </div>
+    </div>
+    <div class="heatmap-toolbar">
+      <label class="field">
+        <span>Pick snapshot date</span>
+        <select id="heatmapDateSelect">
+          <option value="">Latest available</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Heat metric</span>
+        <select id="heatmapMetricSelect">
+          <option value="pick_count">Pick count</option>
+          <option value="pick_qty">Pick quantity</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Find location or SKU</span>
+        <input type="search" id="heatmapSearchInput" placeholder="WF441002 or SKU">
+      </label>
+      <label class="toggle-pill">
+        <input type="checkbox" id="heatmapPickedOnly">
+        <span>Only picked locations</span>
+      </label>
+      <label class="toggle-pill">
+        <input type="checkbox" id="heatmapOccupiedOnly">
+        <span>Only occupied locations</span>
+      </label>
+      <button type="button" id="heatmapReloadButton">Reload</button>
+    </div>
+  </section>
+
+  <section class="heatmap-layout">
+    <section class="panel-card heatmap-scene-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">3D Scene</p>
+          <h2>Warehouse Rack View</h2>
+          <p>Drag to orbit, scroll to zoom, and click a cube to inspect that location.</p>
+        </div>
+        <span class="chip chip--inactive" id="heatmapStatusChip">Loading…</span>
+      </div>
+      <div class="heatmap-scene-wrap">
+        <canvas id="heatmapCanvas"></canvas>
+        <div class="heatmap-legend">
+          <div class="heatmap-legend__bar"></div>
+          <div class="heatmap-legend__labels">
+            <span>Cool</span>
+            <span>Warm</span>
+            <span>Hot</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <aside class="panel-card heatmap-sidebar">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Selection</p>
+          <h2>Location Detail</h2>
+          <p id="heatmapDetailHint">Pick a location in the scene to load SKU and photo detail.</p>
+        </div>
+      </div>
+
+      <div class="heatmap-stats-grid">
+        <article class="metric-card">
+          <p class="eyebrow">Occupied</p>
+          <strong id="heatmapOccupiedMetric">0</strong>
+          <span>locations with a live SKU</span>
+        </article>
+        <article class="metric-card">
+          <p class="eyebrow">Picked</p>
+          <strong id="heatmapPickedMetric">0</strong>
+          <span>locations active on the selected date</span>
+        </article>
+      </div>
+
+      <div id="heatmapDetailCard" class="heatmap-detail-card">
+        <strong class="heatmap-detail-card__empty">No location selected yet.</strong>
+      </div>
+
+      <div class="panel-head heatmap-side-head">
+        <div>
+          <p class="eyebrow">Top Areas</p>
+          <h2>Hottest aisles</h2>
+        </div>
+      </div>
+      <div id="heatmapHotAisles" class="heatmap-hot-aisles">
+        <p class="admin-loading">Loading…</p>
+      </div>
+    </aside>
+  </section>
+</main>
+
+<script>
+  window.ITEMTRACKER_HEATMAP_BOOTSTRAP = <%- safeJson({
+    currentUser
+  }) %>;
+</script>
+<script type="module" src="/static/js/heatmap.js?v=<%= assetVersion %>"></script>
+
+<%- include("partials/footer", { assetVersion }) %>

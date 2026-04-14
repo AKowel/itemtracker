@@ -66,6 +66,14 @@ outer + 20 inch + olive
 - hosted app can mark SKUs that are currently active in the warehouse
 - hosted app can filter down to only warehouse-active SKUs
 
+### Picking heatmap
+
+- admin-only `Picking Heatmap` page on the hosted site
+- 3D rack scene built from the `F&M Layout V4.7.xlsx` schematic manifest
+- location cubes coloured by published pick activity
+- click any location to load current SKU detail, image count, and captured photos
+- latest pick activity comes from shared daily pick snapshots published by `PI-App`
+
 ### Shared metrics
 
 - captured SKU count
@@ -91,6 +99,7 @@ This app currently uses these shared collections:
 - `item_catalog_images`
 - `warehouse_binloc_snapshots`
 - `item_catalog_barcode_snapshots`
+- `warehouse_pick_activity_snapshots`
 
 ### What populates them
 
@@ -102,6 +111,8 @@ This app currently uses these shared collections:
   - daily warehouse activity snapshot published by `PI-App`
 - `item_catalog_barcode_snapshots`
   - daily barcode snapshot published by `PI-App`
+- `warehouse_pick_activity_snapshots`
+  - daily pick activity snapshot published by `PI-App`
 
 ## PI-App Integration
 
@@ -120,6 +131,21 @@ That snapshot is used by the hosted app to:
 - identify active warehouse SKUs
 - filter search results to only active warehouse items
 - calculate warehouse coverage metrics
+
+### Daily pick activity snapshot
+
+`PI-App` also publishes rolling daily pick snapshots built from:
+
+```sql
+SMARTDATA.BARTRN
+JOIN SMARTDATA.BINALC
+```
+
+That snapshot is used by the hosted app to:
+
+- colour warehouse locations by pick heat
+- let admins pick a day and review the busiest areas
+- open any location and inspect the current SKU plus captured photos
 
 ### Daily barcode snapshot
 
@@ -155,7 +181,9 @@ That snapshot is merged into hosted and local catalogue search so extra box barc
 - Main styling: [static/css/app.css](./static/css/app.css)
 - Catalogue UI logic: [static/js/catalogue.js](./static/js/catalogue.js)
 - Hosted catalogue page: [views/catalogue.ejs](./views/catalogue.ejs)
+- Hosted heatmap page: [views/heatmap.ejs](./views/heatmap.ejs)
 - PocketBase bootstrap: [scripts/bootstrap-pocketbase.js](./scripts/bootstrap-pocketbase.js)
+- Layout manifest builder: [scripts/build-layout-manifest.js](./scripts/build-layout-manifest.js)
 - Nginx example: [deploy/nginx.itemtracker.conf](./deploy/nginx.itemtracker.conf)
 - PM2 config: [ecosystem.config.cjs](./ecosystem.config.cjs)
 

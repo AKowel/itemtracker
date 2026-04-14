@@ -9,7 +9,8 @@
   },
   "scripts": {
     "start": "node server.js",
-    "bootstrap": "node scripts/bootstrap-pocketbase.js"
+    "bootstrap": "node scripts/bootstrap-pocketbase.js",
+    "build:layout": "node scripts/build-layout-manifest.js"
   },
   "dependencies": {
     "dotenv": "17.2.2",
@@ -18,6 +19,7 @@
     "express": "5.1.0",
     "express-session": "^1.19.0",
     "html5-qrcode": "^2.3.8",
-    "multer": "^2.0.2"
+    "multer": "^2.0.2",
+    "three": "^0.179.1"
   }
 }

@@ -1,0 +1,353 @@
+{
+  "version": 1,
+  "source_name": "F&M Layout V4.7.xlsx",
+  "generated_at": "2026-04-14T16:40:07.746Z",
+  "workbook": {
+    "sheet_names": [
+      "Schematic",
+      "Layout"
+    ]
+  },
+  "aisle_order": [
+    "NF",
+    "NG",
+    "NH",
+    "NJ",
+    "NK",
+    "NL",
+    "NM",
+    "NN",
+    "NP",
+    "NQ",
+    "NR",
+    "NS",
+    "NT",
+    "NU",
+    "NV",
+    "NW",
+    "NX",
+    "NY",
+    "NZ",
+    "YA",
+    "YB",
+    "YC",
+    "YD",
+    "WF",
+    "WG",
+    "WH",
+    "WJ",
+    "WK",
+    "WL",
+    "WM",
+    "WN",
+    "WP",
+    "WQ",
+    "WR",
+    "WS",
+    "WT",
+    "WU",
+    "WV",
+    "WW",
+    "WX",
+    "WY",
+    "WZ",
+    "XA",
+    "XB",
+    "XC",
+    "XD"
+  ],
+  "zones": [
+    {
+      "zone_key": "zone_1",
+      "zone_label": "North / Yard",
+      "header_row": 7,
+      "aisle_row": 8,
+      "aisles": [
+        {
+          "prefix": "NF",
+          "block": "N",
+          "aisle": "F",
+          "workbook_column": 5
+        },
+        {
+          "prefix": "NG",
+          "block": "N",
+          "aisle": "G",
+          "workbook_column": 8
+        },
+        {
+          "prefix": "NH",
+          "block": "N",
+          "aisle": "H",
+          "workbook_column": 11
+        },
+        {
+          "prefix": "NJ",
+          "block": "N",
+          "aisle": "J",
+          "workbook_column": 14
+        },
+        {
+          "prefix": "NK",
+          "block": "N",
+          "aisle": "K",
+          "workbook_column": 17
+        },
+        {
+          "prefix": "NL",
+          "block": "N",
+          "aisle": "L",
+          "workbook_column": 20
+        },
+        {
+          "prefix": "NM",
+          "block": "N",
+          "aisle": "M",
+          "workbook_column": 23
+        },
+        {
+          "prefix": "NN",
+          "block": "N",
+          "aisle": "N",
+          "workbook_column": 26
+        },
+        {
+          "prefix": "NP",
+          "block": "N",
+          "aisle": "P",
+          "workbook_column": 29
+        },
+        {
+          "prefix": "NQ",
+          "block": "N",
+          "aisle": "Q",
+          "workbook_column": 32
+        },
+        {
+          "prefix": "NR",
+          "block": "N",
+          "aisle": "R",
+          "workbook_column": 35
+        },
+        {
+          "prefix": "NS",
+          "block": "N",
+          "aisle": "S",
+          "workbook_column": 38
+        },
+        {
+          "prefix": "NT",
+          "block": "N",
+          "aisle": "T",
+          "workbook_column": 41
+        },
+        {
+          "prefix": "NU",
+          "block": "N",
+          "aisle": "U",
+          "workbook_column": 44
+        },
+        {
+          "prefix": "NV",
+          "block": "N",
+          "aisle": "V",
+          "workbook_column": 47
+        },
+        {
+          "prefix": "NW",
+          "block": "N",
+          "aisle": "W",
+          "workbook_column": 50
+        },
+        {
+          "prefix": "NX",
+          "block": "N",
+          "aisle": "X",
+          "workbook_column": 53
+        },
+        {
+          "prefix": "NY",
+          "block": "N",
+          "aisle": "Y",
+          "workbook_column": 56
+        },
+        {
+          "prefix": "NZ",
+          "block": "N",
+          "aisle": "Z",
+          "workbook_column": 59
+        },
+        {
+          "prefix": "YA",
+          "block": "Y",
+          "aisle": "A",
+          "workbook_column": 62
+        },
+        {
+          "prefix": "YB",
+          "block": "Y",
+          "aisle": "B",
+          "workbook_column": 65
+        },
+        {
+          "prefix": "YC",
+          "block": "Y",
+          "aisle": "C",
+          "workbook_column": 68
+        },
+        {
+          "prefix": "YD",
+          "block": "Y",
+          "aisle": "D",
+          "workbook_column": 71
+        }
+      ]
+    },
+    {
+      "zone_key": "zone_2",
+      "zone_label": "West / Cross",
+      "header_row": 58,
+      "aisle_row": 59,
+      "aisles": [
+        {
+          "prefix": "WF",
+          "block": "W",
+          "aisle": "F",
+          "workbook_column": 5
+        },
+        {
+          "prefix": "WG",
+          "block": "W",
+          "aisle": "G",
+          "workbook_column": 8
+        },
+        {
+          "prefix": "WH",
+          "block": "W",
+          "aisle": "H",
+          "workbook_column": 11
+        },
+        {
+          "prefix": "WJ",
+          "block": "W",
+          "aisle": "J",
+          "workbook_column": 14
+        },
+        {
+          "prefix": "WK",
+          "block": "W",
+          "aisle": "K",
+          "workbook_column": 17
+        },
+        {
+          "prefix": "WL",
+          "block": "W",
+          "aisle": "L",
+          "workbook_column": 20
+        },
+        {
+          "prefix": "WM",
+          "block": "W",
+          "aisle": "M",
+          "workbook_column": 23
+        },
+        {
+          "prefix": "WN",
+          "block": "W",
+          "aisle": "N",
+          "workbook_column": 26
+        },
+        {
+          "prefix": "WP",
+          "block": "W",
+          "aisle": "P",
+          "workbook_column": 29
+        },
+        {
+          "prefix": "WQ",
+          "block": "W",
+          "aisle": "Q",
+          "workbook_column": 32
+        },
+        {
+          "prefix": "WR",
+          "block": "W",
+          "aisle": "R",
+          "workbook_column": 35
+        },
+        {
+          "prefix": "WS",
+          "block": "W",
+          "aisle": "S",
+          "workbook_column": 38
+        },
+        {
+          "prefix": "WT",
+          "block": "W",
+          "aisle": "T",
+          "workbook_column": 41
+        },
+        {
+          "prefix": "WU",
+          "block": "W",
+          "aisle": "U",
+          "workbook_column": 44
+        },
+        {
+          "prefix": "WV",
+          "block": "W",
+          "aisle": "V",
+          "workbook_column": 47
+        },
+        {
+          "prefix": "WW",
+          "block": "W",
+          "aisle": "W",
+          "workbook_column": 50
+        },
+        {
+          "prefix": "WX",
+          "block": "W",
+          "aisle": "X",
+          "workbook_column": 53
+        },
+        {
+          "prefix": "WY",
+          "block": "W",
+          "aisle": "Y",
+          "workbook_column": 56
+        },
+        {
+          "prefix": "WZ",
+          "block": "W",
+          "aisle": "Z",
+          "workbook_column": 59
+        },
+        {
+          "prefix": "XA",
+          "block": "X",
+          "aisle": "A",
+          "workbook_column": 62
+        },
+        {
+          "prefix": "XB",
+          "block": "X",
+          "aisle": "B",
+          "workbook_column": 65
+        },
+        {
+          "prefix": "XC",
+          "block": "X",
+          "aisle": "C",
+          "workbook_column": 68
+        },
+        {
+          "prefix": "XD",
+          "block": "X",
+          "aisle": "D",
+          "workbook_column": 71
+        }
+      ]
+    }
+  ]
+}

@@ -84,6 +84,7 @@ async function createApp() {
     })
   );
   app.use("/static", express.static(path.join(process.cwd(), "static")));
+  app.use("/vendor/three", express.static(path.join(process.cwd(), "node_modules", "three")));
 
   app.get("/sw.js", (req, res) => {
     res.setHeader("Content-Type", "application/javascript; charset=utf-8");
@@ -494,12 +495,32 @@ async function createApp() {
   // ── Admin page ──────────────────────────────────────────────────────────
 
   app.get(
+    "/picking-heatmap",
+    requireAdminPage,
+    asyncHandler(async (req, res) => {
+      return res.render("heatmap", {
+        pageTitle: `Picking Heatmap | ${config.appName}`
+      });
+    })
+  );
+
+  app.get(
     "/admin",
     requireAdminPage,
     asyncHandler(async (req, res) => {
       return res.render("admin", {
         pageTitle: `Admin | ${config.appName}`
       });
+    })
+  );
+
+  app.get(
+    "/api/admin/picking-heatmap",
+    requireAdminApi,
+    asyncHandler(async (req, res) => {
+      const snapshotDate = String(req.query.date || "").trim();
+      const heatmap = await service.getPickingHeatmap(undefined, snapshotDate);
+      return res.json({ ok: true, heatmap });
     })
   );
 

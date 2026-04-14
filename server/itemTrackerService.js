@@ -12,6 +12,7 @@ const SNAPSHOT_COLLECTION = "item_catalog_snapshots";
 const IMAGE_COLLECTION = "item_catalog_images";
 const BARCODE_SNAPSHOT_COLLECTION = "item_catalog_barcode_snapshots";
 const WAREHOUSE_SNAPSHOT_COLLECTION = "warehouse_binloc_snapshots";
+const PICK_ACTIVITY_SNAPSHOT_COLLECTION = "warehouse_pick_activity_snapshots";
 const ACTIVITY_LOG_COLLECTION = "activity_log";
 const NOTES_COLLECTION = "item_notes";
 const DELETION_REQUESTS_COLLECTION = "deletion_requests";
@@ -20,6 +21,8 @@ const MAX_RESULTS = 60;
 const IMAGE_CACHE_TTL_MS = 60 * 1000;
 const BARCODE_CACHE_TTL_MS = 60 * 1000;
 const WAREHOUSE_CACHE_TTL_MS = 60 * 1000;
+const PICK_ACTIVITY_CACHE_TTL_MS = 60 * 1000;
+const LAYOUT_MANIFEST_PATH = path.join(__dirname, "data", "fandm-layout-v4.7.json");
 
 function isMissingCollectionError(error) {
   if (!(error instanceof PocketBaseError)) {
@@ -47,6 +50,14 @@ function cleanValue(value) {
     return value.toISOString();
   }
   return cleanText(value);
+}
+
+function safeNumber(value) {
+  const num = Number.parseFloat(String(value ?? "").trim());
+  if (!Number.isFinite(num)) {
+    return 0;
+  }
+  return num;
 }
 
 function normalizeExcelCellValue(value) {
@@ -229,6 +240,34 @@ function warehouseSnapshotMeta(record, source = "pocketbase") {
   };
 }
 
+function pickActivitySnapshotMeta(record, source = "pocketbase") {
+  if (!record) {
+    return {
+      available: false,
+      source,
+      warehouse_code: "",
+      client_code: DEFAULT_CLIENT_CODE,
+      snapshot_date: "",
+      row_count: 0,
+      total_pick_count: 0,
+      total_pick_qty: 0,
+      uploaded_at: ""
+    };
+  }
+  return {
+    available: true,
+    source,
+    warehouse_code: record.warehouse_code || "",
+    client_code: record.client_code || DEFAULT_CLIENT_CODE,
+    snapshot_date: record.snapshot_date || "",
+    row_count: Number(record.row_count || 0),
+    total_pick_count: Number(record.total_pick_count || 0),
+    total_pick_qty: safeNumber(record.total_pick_qty || 0),
+    uploaded_at: record.uploaded_at || "",
+    source_synced_at: record.source_synced_at || ""
+  };
+}
+
 class ItemTrackerService {
   constructor(config) {
     this.config = config;
@@ -241,6 +280,8 @@ class ItemTrackerService {
     this.imageCache = new Map();
     this.barcodeSnapshotCache = new Map();
     this.warehouseSnapshotCache = null;
+    this.pickActivitySnapshotCache = new Map();
+    this.layoutManifestCache = null;
   }
 
   isAdminUser(user) {
@@ -330,6 +371,19 @@ class ItemTrackerService {
       { name: "snapshot_file", type: "file", required: true, maxSelect: 1, maxSize: 104857600 }
     ]);
     report.push(`${WAREHOUSE_SNAPSHOT_COLLECTION} ready`);
+
+    await this.ensureCollection(PICK_ACTIVITY_SNAPSHOT_COLLECTION, [
+      { name: "warehouse_code", type: "text", required: true, max: 64 },
+      { name: "client_code", type: "text", required: true, max: 64 },
+      { name: "snapshot_date", type: "text", required: true, max: 32 },
+      { name: "row_count", type: "number", required: false, min: 0, onlyInt: true },
+      { name: "total_pick_count", type: "number", required: false, min: 0, onlyInt: true },
+      { name: "total_pick_qty", type: "number", required: false, min: 0 },
+      { name: "uploaded_at", type: "text", required: false, max: 64 },
+      { name: "source_synced_at", type: "text", required: false, max: 64 },
+      { name: "snapshot_file", type: "file", required: true, maxSelect: 1, maxSize: 52428800 }
+    ]);
+    report.push(`${PICK_ACTIVITY_SNAPSHOT_COLLECTION} ready`);
 
     await this.ensureCollection(ACTIVITY_LOG_COLLECTION, [
       { name: "user_id", type: "text", required: false, max: 64 },
@@ -702,6 +756,276 @@ class ItemTrackerService {
     };
     this.warehouseSnapshotCache = payload;
     return payload;
+  }
+
+  async listPickActivitySnapshotRecords(clientCode = DEFAULT_CLIENT_CODE, limit = 31) {
+    const response = await this.pb.listRecords(PICK_ACTIVITY_SNAPSHOT_COLLECTION, {
+      filterExpr: `client_code=${pbFilterLiteral(clientCode)}`,
+      sort: "-snapshot_date,-uploaded_at",
+      page: 1,
+      perPage: Math.max(1, Math.min(90, limit))
+    });
+    return response.items || [];
+  }
+
+  async getPickActivitySnapshotRecord(clientCode = DEFAULT_CLIENT_CODE, snapshotDate = "") {
+    const filterParts = [`client_code=${pbFilterLiteral(clientCode)}`];
+    if (snapshotDate) {
+      filterParts.push(`snapshot_date=${pbFilterLiteral(snapshotDate)}`);
+    }
+    const response = await this.pb.listRecords(PICK_ACTIVITY_SNAPSHOT_COLLECTION, {
+      filterExpr: filterParts.join(" && "),
+      sort: "-snapshot_date,-uploaded_at",
+      page: 1,
+      perPage: 1
+    });
+    return response.items?.[0] || null;
+  }
+
+  async loadPickActivitySnapshot(snapshotDate = "", clientCode = DEFAULT_CLIENT_CODE, forceRefresh = false) {
+    const cacheKey = `${String(clientCode || DEFAULT_CLIENT_CODE)}::${String(snapshotDate || "latest")}`;
+    const cached = this.pickActivitySnapshotCache.get(cacheKey);
+    const now = Date.now();
+    if (!forceRefresh && cached && now - cached.loadedAt < PICK_ACTIVITY_CACHE_TTL_MS) {
+      return cached;
+    }
+
+    const record = await this.getPickActivitySnapshotRecord(clientCode, snapshotDate);
+    if (!record) {
+      const payload = {
+        loadedAt: now,
+        snapshot: null,
+        meta: pickActivitySnapshotMeta(null, "none")
+      };
+      this.pickActivitySnapshotCache.set(cacheKey, payload);
+      return payload;
+    }
+
+    const fileName = recordFileName(record, "snapshot_file");
+    if (!fileName) {
+      throw new PocketBaseError("Pick activity snapshot file is missing.", 500);
+    }
+
+    const response = await this.pb.proxyFile(
+      record.collectionId || record.collectionName || PICK_ACTIVITY_SNAPSHOT_COLLECTION,
+      record.id,
+      fileName
+    );
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const jsonBuffer = fileName.toLowerCase().endsWith(".gz") ? zlib.gunzipSync(buffer) : buffer;
+    const snapshot = JSON.parse(jsonBuffer.toString("utf-8"));
+    const payload = {
+      loadedAt: now,
+      snapshot,
+      meta: pickActivitySnapshotMeta(record, "pocketbase")
+    };
+    this.pickActivitySnapshotCache.set(cacheKey, payload);
+    return payload;
+  }
+
+  async loadLayoutManifest(forceRefresh = false) {
+    const now = Date.now();
+    if (
+      !forceRefresh &&
+      this.layoutManifestCache &&
+      now - this.layoutManifestCache.loadedAt < PICK_ACTIVITY_CACHE_TTL_MS
+    ) {
+      return this.layoutManifestCache.manifest;
+    }
+    const raw = await fs.readFile(LAYOUT_MANIFEST_PATH, "utf8");
+    const manifest = JSON.parse(raw);
+    this.layoutManifestCache = {
+      loadedAt: now,
+      manifest
+    };
+    return manifest;
+  }
+
+  parseHeatmapLocation(locationCode = "") {
+    const text = String(locationCode || "").trim().toUpperCase();
+    const digits = text.slice(2).replace(/\D+/g, "");
+    return {
+      location: text,
+      aisle_prefix: text.slice(0, 2),
+      bay: digits.slice(0, 2),
+      level: digits.slice(2, 4),
+      slot: digits.slice(4, 6)
+    };
+  }
+
+  async getPickingHeatmap(clientCode = DEFAULT_CLIENT_CODE, snapshotDate = "") {
+    const targetClient = String(clientCode || DEFAULT_CLIENT_CODE).trim().toUpperCase();
+    const [layoutManifest, warehouseState, pickState, pickRecords, catalogState, imageState] = await Promise.all([
+      this.loadLayoutManifest(),
+      this.loadWarehouseSnapshot(),
+      this.loadPickActivitySnapshot(snapshotDate, targetClient),
+      this.listPickActivitySnapshotRecords(targetClient, 31).catch(() => []),
+      this.loadSnapshot(targetClient).catch(() => ({ snapshot: null, meta: this.snapshotMeta(null, "none") })),
+      this.loadImageIndex(targetClient).catch(() => ({ imageMap: new Map(), imageSkuSet: new Set(), imageRecordCount: 0 }))
+    ]);
+
+    let barcodeSnapshot = null;
+    try {
+      barcodeSnapshot = (await this.loadBarcodeSnapshot(targetClient)).snapshot;
+    } catch (_) {
+      barcodeSnapshot = null;
+    }
+    if (catalogState?.snapshot) {
+      this.applyBarcodeSnapshot(catalogState.snapshot, barcodeSnapshot);
+    }
+
+    const catalogItems = new Map();
+    for (const item of catalogState?.snapshot?.items || []) {
+      const sku = normalizeSku(item?.sku);
+      if (sku) {
+        catalogItems.set(sku, item);
+      }
+    }
+
+    const imageMap = imageState.imageMap || new Map();
+    const pickRows = pickState?.snapshot?.rows || [];
+    const pickMap = new Map();
+    for (const row of pickRows) {
+      const key = String(row?.location || "").trim().toUpperCase();
+      if (key) {
+        pickMap.set(key, row);
+      }
+    }
+
+    const aisleOrder = Array.isArray(layoutManifest?.aisle_order) ? layoutManifest.aisle_order : [];
+    const aisleIndex = new Map(aisleOrder.map((prefix, index) => [prefix, index]));
+    const zoneIndex = new Map();
+    for (const zone of layoutManifest?.zones || []) {
+      for (const aisle of zone.aisles || []) {
+        zoneIndex.set(aisle.prefix, zone.zone_key);
+      }
+    }
+
+    const locationMap = new Map();
+    for (const row of warehouseState?.snapshot?.rows || []) {
+      const client = String(row?.BLCCOD || row?.Client || row?.client_code || "").trim().toUpperCase();
+      if (targetClient && client && client !== targetClient) {
+        continue;
+      }
+      const locationCode = String(row?.BLBINL || row?.["Bin Location"] || row?.bin_location || "").trim().toUpperCase();
+      if (!locationCode) {
+        continue;
+      }
+      const status = String(row?.BLSTS || row?.status || "").trim().toUpperCase();
+      if (status && status !== "Y") {
+        continue;
+      }
+      const parts = this.parseHeatmapLocation(locationCode);
+      const sku = normalizeSku(row?.BLITEM || row?.["Item SKU"] || row?.sku);
+      const catalogItem = catalogItems.get(sku) || null;
+      locationMap.set(locationCode, {
+        location: locationCode,
+        aisle_prefix: parts.aisle_prefix,
+        bay: parts.bay,
+        level: parts.level,
+        slot: parts.slot,
+        zone_key: zoneIndex.get(parts.aisle_prefix) || "",
+        aisle_index: aisleIndex.has(parts.aisle_prefix) ? aisleIndex.get(parts.aisle_prefix) : 9999,
+        sku,
+        description: catalogItem?.description || catalogItem?.description_short || "",
+        qty: safeNumber(row?.BLQTY || row?.qty || 0),
+        status: status || "Y",
+        image_count: imageMap.get(sku)?.length || 0,
+        has_images: imageMap.has(sku),
+        pick_count: 0,
+        pick_qty: 0,
+        picker_count: 0,
+        top_skus: []
+      });
+    }
+
+    for (const row of pickRows) {
+      const locationCode = String(row?.location || "").trim().toUpperCase();
+      if (!locationCode) {
+        continue;
+      }
+      const parts = this.parseHeatmapLocation(locationCode);
+      const entry =
+        locationMap.get(locationCode) ||
+        {
+          location: locationCode,
+          aisle_prefix: parts.aisle_prefix,
+          bay: parts.bay,
+          level: parts.level,
+          slot: parts.slot,
+          zone_key: zoneIndex.get(parts.aisle_prefix) || "",
+          aisle_index: aisleIndex.has(parts.aisle_prefix) ? aisleIndex.get(parts.aisle_prefix) : 9999,
+          sku: "",
+          description: "",
+          qty: 0,
+          status: "",
+          image_count: 0,
+          has_images: false,
+          top_skus: []
+        };
+      entry.pick_count = Number(row?.pick_count || 0);
+      entry.pick_qty = safeNumber(row?.pick_qty || 0);
+      entry.picker_count = Number(row?.picker_count || 0);
+      entry.top_skus = Array.isArray(row?.top_skus) ? row.top_skus : [];
+      locationMap.set(locationCode, entry);
+    }
+
+    const rows = Array.from(locationMap.values()).sort((a, b) => {
+      if (a.aisle_index !== b.aisle_index) {
+        return a.aisle_index - b.aisle_index;
+      }
+      return (
+        Number.parseInt(a.bay || "0", 10) - Number.parseInt(b.bay || "0", 10) ||
+        Number.parseInt(a.level || "0", 10) - Number.parseInt(b.level || "0", 10) ||
+        Number.parseInt(a.slot || "0", 10) - Number.parseInt(b.slot || "0", 10) ||
+        String(a.location || "").localeCompare(String(b.location || ""))
+      );
+    });
+
+    const hottestByAisle = new Map();
+    let occupiedCount = 0;
+    let pickedCount = 0;
+    let totalPickCount = 0;
+    let totalPickQty = 0;
+    for (const row of rows) {
+      if (row.sku) {
+        occupiedCount += 1;
+      }
+      if (row.pick_count > 0) {
+        pickedCount += 1;
+      }
+      totalPickCount += Number(row.pick_count || 0);
+      totalPickQty += safeNumber(row.pick_qty || 0);
+      const aisle = row.aisle_prefix || "__UNKNOWN__";
+      const summary = hottestByAisle.get(aisle) || { aisle_prefix: aisle, pick_count: 0, pick_qty: 0, location_count: 0 };
+      summary.pick_count += Number(row.pick_count || 0);
+      summary.pick_qty += safeNumber(row.pick_qty || 0);
+      summary.location_count += 1;
+      hottestByAisle.set(aisle, summary);
+    }
+
+    return {
+      layout: layoutManifest,
+      rows,
+      meta: {
+        client_code: targetClient,
+        warehouse_snapshot_date: warehouseState?.meta?.snapshot_date || "",
+        pick_snapshot_date: pickState?.meta?.snapshot_date || "",
+        available_pick_dates: (pickRecords || []).map((record) => String(record.snapshot_date || "")).filter(Boolean),
+        pick_snapshot_meta: pickState?.meta || pickActivitySnapshotMeta(null, "none"),
+        item_catalog_meta: catalogState?.meta || this.snapshotMeta(null, "none")
+      },
+      stats: {
+        location_count: rows.length,
+        occupied_location_count: occupiedCount,
+        picked_location_count: pickedCount,
+        total_pick_count: totalPickCount,
+        total_pick_qty: totalPickQty,
+        hottest_aisles: Array.from(hottestByAisle.values())
+          .sort((a, b) => (b.pick_count - a.pick_count) || (b.pick_qty - a.pick_qty))
+          .slice(0, 8)
+      }
+    };
   }
 
   buildWarehouseSkuSet(snapshot, clientCode = DEFAULT_CLIENT_CODE) {

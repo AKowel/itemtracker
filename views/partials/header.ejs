@@ -7,6 +7,7 @@
     <% if (currentUser) { %>
       <div class="site-header__actions">
         <% if (currentUser.isAdmin) { %>
+          <a href="/picking-heatmap" class="ghost-button site-header__admin-link">Heatmap</a>
           <a href="/admin" class="ghost-button site-header__admin-link">Admin</a>
         <% } %>
         <div class="user-chip">
