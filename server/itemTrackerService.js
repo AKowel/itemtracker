@@ -13,6 +13,8 @@ const IMAGE_COLLECTION = "item_catalog_images";
 const BARCODE_SNAPSHOT_COLLECTION = "item_catalog_barcode_snapshots";
 const WAREHOUSE_SNAPSHOT_COLLECTION = "warehouse_binloc_snapshots";
 const ACTIVITY_LOG_COLLECTION = "activity_log";
+const NOTES_COLLECTION = "item_notes";
+const DELETION_REQUESTS_COLLECTION = "deletion_requests";
 const DEFAULT_CLIENT_CODE = "FANDMKET";
 const MAX_RESULTS = 60;
 const IMAGE_CACHE_TTL_MS = 60 * 1000;
@@ -330,6 +332,34 @@ class ItemTrackerService {
       { name: "ip_address", type: "text", required: false, max: 64 }
     ]);
     report.push(`${ACTIVITY_LOG_COLLECTION} ready`);
+
+    await this.ensureCollection(NOTES_COLLECTION, [
+      { name: "client_code", type: "text", required: true, max: 64 },
+      { name: "sku", type: "text", required: true, max: 64 },
+      { name: "notes", type: "text", required: false, max: 10000 },
+      { name: "updated_at", type: "text", required: false, max: 64 },
+      { name: "updated_by_user_id", type: "text", required: false, max: 64 },
+      { name: "updated_by_email", type: "text", required: false, max: 255 },
+      { name: "updated_by_name", type: "text", required: false, max: 255 }
+    ]);
+    report.push(`${NOTES_COLLECTION} ready`);
+
+    await this.ensureCollection(DELETION_REQUESTS_COLLECTION, [
+      { name: "client_code", type: "text", required: true, max: 64 },
+      { name: "sku", type: "text", required: true, max: 64 },
+      { name: "image_id", type: "text", required: true, max: 64 },
+      { name: "image_url", type: "text", required: false, max: 1000 },
+      { name: "image_caption", type: "text", required: false, max: 1000 },
+      { name: "status", type: "text", required: true, max: 16 },
+      { name: "requested_at", type: "text", required: false, max: 64 },
+      { name: "requested_by_user_id", type: "text", required: false, max: 64 },
+      { name: "requested_by_email", type: "text", required: false, max: 255 },
+      { name: "requested_by_name", type: "text", required: false, max: 255 },
+      { name: "reviewed_at", type: "text", required: false, max: 64 },
+      { name: "reviewed_by_user_id", type: "text", required: false, max: 64 },
+      { name: "reviewed_by_email", type: "text", required: false, max: 255 }
+    ]);
+    report.push(`${DELETION_REQUESTS_COLLECTION} ready`);
 
     return report;
   }
@@ -821,7 +851,23 @@ class ItemTrackerService {
     if (!item) return null;
 
     const imageState = await this.loadImageIndex(clientCode);
-    const images = (imageState.imageMap || new Map()).get(normalizedSku) || [];
+    const rawImages = (imageState.imageMap || new Map()).get(normalizedSku) || [];
+
+    // Tag images that have a pending deletion request
+    let pendingDeletionIds = new Set();
+    try {
+      const pendingReqs = await this.pb.listAllRecords(DELETION_REQUESTS_COLLECTION, {
+        filterExpr: `sku=${pbFilterLiteral(normalizedSku)} && status=${pbFilterLiteral("pending")}`,
+        sort: "-requested_at",
+        perPage: 200
+      });
+      pendingDeletionIds = new Set((pendingReqs || []).map((r) => r.image_id).filter(Boolean));
+    } catch (_) {}
+
+    const images = rawImages.map((img) => ({
+      ...img,
+      pending_deletion: pendingDeletionIds.has(img.id)
+    }));
 
     let warehouseActive = false;
     const binLocations = [];
@@ -1208,6 +1254,136 @@ class ItemTrackerService {
     await this.pb.updateRecord(USERS_COLLECTION, userId, {
       password: newPassword,
       passwordConfirm: newPassword
+    });
+  }
+
+  // ── Notes ────────────────────────────────────────────────────────────────
+
+  async getSkuNotes(sku, clientCode = DEFAULT_CLIENT_CODE) {
+    const normalizedSku = normalizeSku(sku);
+    if (!normalizedSku) return null;
+    const response = await this.pb.listRecords(NOTES_COLLECTION, {
+      filterExpr: `sku=${pbFilterLiteral(normalizedSku)} && client_code=${pbFilterLiteral(clientCode)}`,
+      sort: "-updated_at",
+      page: 1,
+      perPage: 1
+    });
+    const record = response.items?.[0] || null;
+    if (!record) return null;
+    return {
+      id: record.id,
+      notes: record.notes || "",
+      updated_at: record.updated_at || "",
+      updated_by_email: record.updated_by_email || "",
+      updated_by_name: record.updated_by_name || ""
+    };
+  }
+
+  async saveSkuNotes(sku, notes, user, clientCode = DEFAULT_CLIENT_CODE) {
+    const normalizedSku = normalizeSku(sku);
+    if (!normalizedSku) throw new PocketBaseError("SKU is required.", 400);
+    const updatedAt = new Date().toISOString();
+    const payload = {
+      client_code: clientCode,
+      sku: normalizedSku,
+      notes: String(notes || "").slice(0, 10000),
+      updated_at: updatedAt,
+      updated_by_user_id: user?.id || "",
+      updated_by_email: user?.email || "",
+      updated_by_name: user?.name || ""
+    };
+    // Check for existing record
+    const response = await this.pb.listRecords(NOTES_COLLECTION, {
+      filterExpr: `sku=${pbFilterLiteral(normalizedSku)} && client_code=${pbFilterLiteral(clientCode)}`,
+      page: 1,
+      perPage: 1
+    });
+    const existing = response.items?.[0] || null;
+    if (existing) {
+      await this.pb.updateRecord(NOTES_COLLECTION, existing.id, payload);
+    } else {
+      await this.pb.createRecord(NOTES_COLLECTION, payload);
+    }
+    return { notes: payload.notes, updated_at: updatedAt, updated_by_name: user?.name || "", updated_by_email: user?.email || "" };
+  }
+
+  // ── Deletion requests ─────────────────────────────────────────────────────
+
+  async requestImageDeletion(imageId, sku, imageUrl, imageCaption, user, clientCode = DEFAULT_CLIENT_CODE) {
+    if (!imageId) throw new PocketBaseError("Image ID is required.", 400);
+    // Check no existing pending request for this image
+    const existing = await this.pb.listRecords(DELETION_REQUESTS_COLLECTION, {
+      filterExpr: `image_id=${pbFilterLiteral(imageId)} && status=${pbFilterLiteral("pending")}`,
+      page: 1,
+      perPage: 1
+    });
+    if (existing.items?.length) {
+      throw new PocketBaseError("A deletion request for this photo is already pending.", 400);
+    }
+    await this.pb.createRecord(DELETION_REQUESTS_COLLECTION, {
+      client_code: clientCode,
+      sku: normalizeSku(sku) || String(sku || ""),
+      image_id: imageId,
+      image_url: String(imageUrl || "").slice(0, 1000),
+      image_caption: String(imageCaption || "").slice(0, 1000),
+      status: "pending",
+      requested_at: new Date().toISOString(),
+      requested_by_user_id: user?.id || "",
+      requested_by_email: user?.email || "",
+      requested_by_name: user?.name || ""
+    });
+  }
+
+  async getDeletionQueue(clientCode = DEFAULT_CLIENT_CODE) {
+    const response = await this.pb.listRecords(DELETION_REQUESTS_COLLECTION, {
+      filterExpr: `status=${pbFilterLiteral("pending")}`,
+      sort: "-requested_at",
+      page: 1,
+      perPage: 200
+    });
+    return (response.items || []).map((r) => ({
+      id: r.id,
+      sku: r.sku || "",
+      image_id: r.image_id || "",
+      image_url: r.image_url || "",
+      image_caption: r.image_caption || "",
+      status: r.status || "pending",
+      requested_at: r.requested_at || "",
+      requested_by_email: r.requested_by_email || "",
+      requested_by_name: r.requested_by_name || ""
+    }));
+  }
+
+  async approveDeletion(requestId, adminUser, clientCode = DEFAULT_CLIENT_CODE) {
+    const request = await this.pb.getRecord(DELETION_REQUESTS_COLLECTION, requestId);
+    if (!request) throw new PocketBaseError("Deletion request not found.", 404);
+    if (request.status !== "pending") throw new PocketBaseError("This request is no longer pending.", 400);
+    // Delete the actual image record
+    try {
+      await this.pb.deleteRecord(IMAGE_COLLECTION, request.image_id);
+    } catch (err) {
+      // If already gone, still mark approved
+      if (!(err instanceof PocketBaseError) || err.statusCode !== 404) throw err;
+    }
+    await this.pb.updateRecord(DELETION_REQUESTS_COLLECTION, requestId, {
+      status: "approved",
+      reviewed_at: new Date().toISOString(),
+      reviewed_by_user_id: adminUser?.id || "",
+      reviewed_by_email: adminUser?.email || ""
+    });
+    // Bust image cache so the deleted photo disappears immediately
+    this.imageCache.delete(String(clientCode || DEFAULT_CLIENT_CODE));
+  }
+
+  async rejectDeletion(requestId, adminUser) {
+    const request = await this.pb.getRecord(DELETION_REQUESTS_COLLECTION, requestId);
+    if (!request) throw new PocketBaseError("Deletion request not found.", 404);
+    if (request.status !== "pending") throw new PocketBaseError("This request is no longer pending.", 400);
+    await this.pb.updateRecord(DELETION_REQUESTS_COLLECTION, requestId, {
+      status: "rejected",
+      reviewed_at: new Date().toISOString(),
+      reviewed_by_user_id: adminUser?.id || "",
+      reviewed_by_email: adminUser?.email || ""
     });
   }
 }

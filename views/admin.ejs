@@ -10,6 +10,7 @@
       <div class="hero-card__chips">
         <span class="chip" id="activeSessionsChip">Loading sessions…</span>
         <span class="chip" id="totalUsersChip">Loading users…</span>
+        <span class="chip" id="deletionQueueChip">Loading queue…</span>
       </div>
     </div>
   </section>
@@ -39,6 +40,21 @@
       </div>
     </div>
     <div id="usersTableWrap">
+      <p class="admin-loading">Loading…</p>
+    </div>
+  </section>
+
+  <%# ── Deletion queue ─────────────────────────────────────────────────── %>
+  <section class="panel-card">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Photo moderation</p>
+        <h2>Pending deletions</h2>
+        <p>Users have requested these photos be removed. Approve to permanently delete, or reject to reinstate the photo.</p>
+      </div>
+      <span class="chip chip--inactive" id="deletionCountChip" hidden>0 pending</span>
+    </div>
+    <div id="deletionQueueWrap">
       <p class="admin-loading">Loading…</p>
     </div>
   </section>

@@ -7,6 +7,9 @@
   var activityTableWrap   = document.getElementById("activityTableWrap");
   var activityCountChip   = document.getElementById("activityCountChip");
   var logoutAllButton     = document.getElementById("logoutAllButton");
+  var deletionQueueWrap   = document.getElementById("deletionQueueWrap");
+  var deletionQueueChip   = document.getElementById("deletionQueueChip");
+  var deletionCountChip   = document.getElementById("deletionCountChip");
 
   var resetModal          = document.getElementById("resetModal");
   var resetModalTitle     = document.getElementById("resetModalTitle");
@@ -51,7 +54,11 @@
       import_workbook:          "Imported workbook",
       admin_force_logout:       "Force-logged out user",
       admin_force_logout_all:   "Force-logged out all",
-      admin_reset_password:     "Reset password"
+      admin_reset_password:     "Reset password",
+      edit_notes:               "Edited notes",
+      request_image_deletion:   "Requested deletion",
+      approve_deletion:         "Approved deletion",
+      reject_deletion:          "Rejected deletion"
     };
     return map[action] || String(action || "");
   }
@@ -62,6 +69,10 @@
     if (action.startsWith("upload")) return "activity-badge activity-badge--upload";
     if (action.startsWith("import")) return "activity-badge activity-badge--import";
     if (action.startsWith("admin"))  return "activity-badge activity-badge--admin";
+    if (action === "approve_deletion") return "activity-badge activity-badge--admin";
+    if (action === "reject_deletion")  return "activity-badge activity-badge--admin";
+    if (action === "request_image_deletion") return "activity-badge activity-badge--upload";
+    if (action === "edit_notes") return "activity-badge activity-badge--import";
     return "activity-badge";
   }
 
@@ -72,6 +83,9 @@
     if (action === "admin_force_logout") return detail.target_user_id ? "User " + String(detail.target_user_id).slice(0, 8) + "…" : "";
     if (action === "admin_reset_password") return detail.target_user_id ? "User " + String(detail.target_user_id).slice(0, 8) + "…" : "";
     if (action === "admin_force_logout_all") return detail.sessions_ended != null ? detail.sessions_ended + " session" + (detail.sessions_ended === 1 ? "" : "s") + " ended" : "";
+    if (action === "edit_notes") return detail.sku || "";
+    if (action === "request_image_deletion") return detail.sku || "";
+    if (action === "approve_deletion" || action === "reject_deletion") return detail.sku || "";
     return "";
   }
 
@@ -184,6 +198,89 @@
       '</div>';
   }
 
+  // ── Render deletion queue ─────────────────────────────────────────────────
+
+  function renderDeletionQueue(requests) {
+    var count = requests.length;
+    if (deletionQueueChip) {
+      deletionQueueChip.textContent = count + " pending deletion" + (count === 1 ? "" : "s");
+    }
+    if (deletionCountChip) {
+      deletionCountChip.textContent = count + " pending";
+      deletionCountChip.hidden = count === 0;
+    }
+    if (!deletionQueueWrap) return;
+    if (!count) {
+      deletionQueueWrap.innerHTML = '<p class="admin-empty">No pending deletion requests — the queue is clear.</p>';
+      return;
+    }
+    var cards = requests.map(function (req) {
+      var thumb = req.image_url
+        ? '<img class="deletion-thumb" src="' + escapeHtml(req.image_url) + '" alt="Photo to delete" loading="lazy">'
+        : '<div class="deletion-thumb deletion-thumb--placeholder">No preview</div>';
+      var caption = req.image_caption ? '<p class="admin-sub">"' + escapeHtml(req.image_caption) + '"</p>' : '';
+      var requestedBy = req.requested_by_name || req.requested_by || "Unknown";
+      var requestedAt = formatDate(req.created);
+      return (
+        '<div class="deletion-card">' +
+          '<div class="deletion-card__thumb">' + thumb + '</div>' +
+          '<div class="deletion-card__info">' +
+            '<strong>' + escapeHtml(req.sku || "—") + '</strong>' +
+            caption +
+            '<p class="admin-sub">Requested by <strong>' + escapeHtml(requestedBy) + '</strong> · ' + escapeHtml(requestedAt) + '</p>' +
+          '</div>' +
+          '<div class="deletion-card__actions">' +
+            '<button type="button" class="admin-danger-button deletion-approve-btn" data-id="' + escapeHtml(req.id) + '" data-sku="' + escapeHtml(req.sku || "") + '">Delete photo</button>' +
+            '<button type="button" class="ghost-button deletion-reject-btn" data-id="' + escapeHtml(req.id) + '" data-sku="' + escapeHtml(req.sku || "") + '">Reject</button>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join("");
+    deletionQueueWrap.innerHTML = '<div class="deletion-queue">' + cards + '</div>';
+
+    deletionQueueWrap.querySelectorAll(".deletion-approve-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () { handleApproveDeletion(btn.dataset.id, btn.dataset.sku); });
+    });
+    deletionQueueWrap.querySelectorAll(".deletion-reject-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () { handleRejectDeletion(btn.dataset.id, btn.dataset.sku); });
+    });
+  }
+
+  async function handleApproveDeletion(requestId, sku) {
+    if (!requestId) return;
+    if (!confirm("Permanently delete this photo for " + (sku || "this SKU") + "? This cannot be undone.")) return;
+    try {
+      await apiFetch("/api/admin/deletion-queue/" + encodeURIComponent(requestId) + "/approve", { method: "POST" });
+      window.ItemTracker?.toast("Photo deleted successfully", "success");
+      await loadDeletionQueue();
+    } catch (err) {
+      window.ItemTracker?.toast(err.message || "Could not delete photo", "error");
+    }
+  }
+
+  async function handleRejectDeletion(requestId, sku) {
+    if (!requestId) return;
+    if (!confirm("Reject this deletion request? The photo will remain visible.")) return;
+    try {
+      await apiFetch("/api/admin/deletion-queue/" + encodeURIComponent(requestId) + "/reject", { method: "POST" });
+      window.ItemTracker?.toast("Deletion request rejected — photo reinstated", "info");
+      await loadDeletionQueue();
+    } catch (err) {
+      window.ItemTracker?.toast(err.message || "Could not reject request", "error");
+    }
+  }
+
+  async function loadDeletionQueue() {
+    try {
+      var data = await apiFetch("/api/admin/deletion-queue");
+      renderDeletionQueue(data.requests || []);
+    } catch (err) {
+      if (deletionQueueWrap) {
+        deletionQueueWrap.innerHTML = '<p class="admin-empty">Could not load deletion queue.</p>';
+      }
+    }
+  }
+
   // ── Load all data ─────────────────────────────────────────────────────────
 
   var cachedSessions = [];
@@ -202,6 +299,7 @@
     } catch (err) {
       window.ItemTracker?.toast(err.message || "Could not load admin data", "error");
     }
+    await loadDeletionQueue();
   }
 
   // ── Actions ───────────────────────────────────────────────────────────────

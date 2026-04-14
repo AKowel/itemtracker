@@ -322,7 +322,8 @@ async function createApp() {
       }
       return res.render("sku", {
         pageTitle: `${detail.sku} | ${config.appName}`,
-        sku: detail
+        sku: detail,
+        isAdmin: Boolean(req.currentUser?.isAdmin)
       });
     })
   );
@@ -413,6 +414,80 @@ async function createApp() {
       res.setHeader("Cache-Control", "private, max-age=300");
       const buffer = Buffer.from(await response.arrayBuffer());
       return res.send(buffer);
+    })
+  );
+
+  // ── SKU notes ───────────────────────────────────────────────────────────
+
+  app.get(
+    "/api/catalog/sku/:sku/notes",
+    requireLoginApi,
+    asyncHandler(async (req, res) => {
+      const sku = String(req.params.sku || "").trim();
+      const notes = await service.getSkuNotes(sku);
+      return res.json({ ok: true, notes });
+    })
+  );
+
+  app.post(
+    "/api/catalog/sku/:sku/notes",
+    requireLoginApi,
+    asyncHandler(async (req, res) => {
+      const sku = String(req.params.sku || "").trim();
+      const text = String(req.body.notes || "");
+      const result = await service.saveSkuNotes(sku, text, req.currentUser);
+      service.logActivity(req.currentUser, "edit_notes", { sku }, req.ip || "");
+      return res.json({ ok: true, notes: result });
+    })
+  );
+
+  // ── Deletion requests ────────────────────────────────────────────────────
+
+  app.post(
+    "/api/catalog/images/:imageId/request-delete",
+    requireLoginApi,
+    asyncHandler(async (req, res) => {
+      const imageId = String(req.params.imageId || "").trim();
+      const sku = String(req.body.sku || "").trim();
+      const imageUrl = String(req.body.imageUrl || "").trim();
+      const imageCaption = String(req.body.imageCaption || "").trim();
+      if (!imageId || !sku) {
+        return res.status(400).json({ ok: false, error: "imageId and sku are required." });
+      }
+      await service.requestImageDeletion(imageId, sku, imageUrl, imageCaption, req.currentUser);
+      service.logActivity(req.currentUser, "request_image_deletion", { sku, image_id: imageId }, req.ip || "");
+      return res.json({ ok: true });
+    })
+  );
+
+  app.get(
+    "/api/admin/deletion-queue",
+    requireAdminApi,
+    asyncHandler(async (req, res) => {
+      const queue = await service.getDeletionQueue();
+      return res.json({ ok: true, queue });
+    })
+  );
+
+  app.post(
+    "/api/admin/deletion-queue/:id/approve",
+    requireAdminApi,
+    asyncHandler(async (req, res) => {
+      const requestId = String(req.params.id || "").trim();
+      await service.approveDeletion(requestId, req.currentUser);
+      service.logActivity(req.currentUser, "approve_deletion", { request_id: requestId }, req.ip || "");
+      return res.json({ ok: true });
+    })
+  );
+
+  app.post(
+    "/api/admin/deletion-queue/:id/reject",
+    requireAdminApi,
+    asyncHandler(async (req, res) => {
+      const requestId = String(req.params.id || "").trim();
+      await service.rejectDeletion(requestId, req.currentUser);
+      service.logActivity(req.currentUser, "reject_deletion", { request_id: requestId }, req.ip || "");
+      return res.json({ ok: true });
     })
   );
 

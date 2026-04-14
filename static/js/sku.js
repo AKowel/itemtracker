@@ -2,6 +2,7 @@
   var boot = window.SKU_BOOTSTRAP || {};
   var skuData = boot.sku || {};
   var skuId = String(skuData.sku || "");
+  var isAdmin = Boolean(boot.isAdmin);
 
   var currentImages = Array.isArray(skuData.images) ? skuData.images.slice() : [];
   var pendingEntries = [];
@@ -28,6 +29,12 @@
 
   var lightboxImages = [];
   var lightboxIndex  = 0;
+
+  // Notes refs
+  var notesTextarea   = document.getElementById("notesTextarea");
+  var notesSaveChip   = document.getElementById("notesSaveChip");
+  var notesLastEdited = document.getElementById("notesLastEdited");
+  var notesSaveTimer  = null;
 
   var PLACEHOLDER = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Crect width='100%25' height='100%25' fill='%23eef3f9'/%3E%3Ctext x='50%25' y='50%25' dominant-baseline='middle' text-anchor='middle' fill='%2361728a' font-size='13' font-family='Arial'%3ENo Photo%3C/text%3E%3C/svg%3E";
   var IMAGE_MAX_DIMENSION = 1600;
@@ -325,18 +332,55 @@
       return;
     }
     photosGrid.innerHTML = currentImages.map(function (image, index) {
+      var isPending = Boolean(image.pending_deletion);
       return (
-        '<button type="button" class="photo-card photo-card--button sku-photo-btn" data-index="' + index + '">' +
-          '<img src="' + escapeHtml(image.url || "") + '" alt="' + escapeHtml(skuId + " photo " + (index + 1)) + '">' +
-          '<span>' + escapeHtml(image.caption || ("Photo " + (index + 1))) + '</span>' +
-        '</button>'
+        '<div class="sku-photo-wrap' + (isPending ? ' sku-photo-wrap--pending" title="Deletion pending admin review' : '"') + '">' +
+          '<button type="button" class="photo-card photo-card--button sku-photo-btn" data-index="' + index + '"' + (isPending ? ' disabled' : '') + '>' +
+            '<img src="' + escapeHtml(image.url || "") + '" alt="' + escapeHtml(skuId + " photo " + (index + 1)) + '">' +
+            '<span>' + escapeHtml(image.caption || ("Photo " + (index + 1))) + '</span>' +
+          '</button>' +
+          (isPending
+            ? '<div class="sku-photo-pending-badge">Pending deletion</div>'
+            : '<button type="button" class="sku-photo-delete-btn" data-image-id="' + escapeHtml(image.id) + '" data-image-url="' + escapeHtml(image.url || "") + '" data-image-caption="' + escapeHtml(image.caption || "") + '" aria-label="Request deletion">&#128465;</button>'
+          ) +
+        '</div>'
       );
     }).join("");
+
     photosGrid.querySelectorAll(".sku-photo-btn").forEach(function (btn) {
       btn.addEventListener("click", function () {
+        if (btn.disabled) return;
         openLightbox(Number(btn.dataset.index || 0));
       });
     });
+
+    photosGrid.querySelectorAll(".sku-photo-delete-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        handleRequestDeletion(btn.dataset.imageId, btn.dataset.imageUrl, btn.dataset.imageCaption);
+      });
+    });
+  }
+
+  async function handleRequestDeletion(imageId, imageUrl, imageCaption) {
+    if (!imageId) return;
+    if (!confirm("Request deletion of this photo?\n\nAn admin will review the request before it is removed.")) return;
+    try {
+      var response = await fetch("/api/catalog/images/" + encodeURIComponent(imageId) + "/request-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sku: skuId, imageUrl: imageUrl, imageCaption: imageCaption })
+      });
+      var data = await response.json().catch(function () { return {}; });
+      if (!response.ok) throw new Error(data.error || "Could not request deletion");
+      // Mark image as pending locally so the UI updates immediately
+      currentImages = currentImages.map(function (img) {
+        return img.id === imageId ? Object.assign({}, img, { pending_deletion: true }) : img;
+      });
+      renderPhotos();
+      window.ItemTracker?.toast("Deletion request submitted — awaiting admin review", "info");
+    } catch (err) {
+      window.ItemTracker?.toast(err.message || "Could not request deletion", "error");
+    }
   }
 
   function renderTray() {
@@ -432,6 +476,60 @@
     syncLightbox();
   }
 
+  // ── Notes ─────────────────────────────────────────────────────────────────
+
+  function showNotesLastEdited(noteRecord) {
+    if (!notesLastEdited) return;
+    if (!noteRecord || !noteRecord.updated) { notesLastEdited.hidden = true; return; }
+    var who = noteRecord.updated_by_name || noteRecord.updated_by || "";
+    var when = new Date(noteRecord.updated);
+    var whenStr = isNaN(when.getTime()) ? String(noteRecord.updated) :
+      when.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" }) + " " +
+      when.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+    notesLastEdited.textContent = "Last edited" + (who ? " by " + who : "") + " · " + whenStr;
+    notesLastEdited.hidden = false;
+  }
+
+  async function loadNotes() {
+    if (!notesTextarea) return;
+    try {
+      var response = await fetch("/api/catalog/sku/" + encodeURIComponent(skuId) + "/notes", { cache: "no-store" });
+      var data = await response.json().catch(function () { return {}; });
+      if (data.ok && data.notes) {
+        notesTextarea.value = data.notes.notes || "";
+        showNotesLastEdited(data.notes);
+      }
+    } catch (_) {}
+  }
+
+  async function saveNotes() {
+    if (!notesTextarea) return;
+    var text = notesTextarea.value;
+    try {
+      var response = await fetch("/api/catalog/sku/" + encodeURIComponent(skuId) + "/notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ notes: text })
+      });
+      var data = await response.json().catch(function () { return {}; });
+      if (!response.ok) throw new Error(data.error || "Could not save notes");
+      if (notesSaveChip) {
+        notesSaveChip.hidden = false;
+        setTimeout(function () { if (notesSaveChip) notesSaveChip.hidden = true; }, 2500);
+      }
+      if (data.notes) showNotesLastEdited(data.notes);
+    } catch (_) {}
+  }
+
+  function scheduleNotesSave() {
+    if (notesSaveTimer) clearTimeout(notesSaveTimer);
+    notesSaveTimer = setTimeout(saveNotes, 2000);
+  }
+
+  if (notesTextarea) {
+    notesTextarea.addEventListener("input", scheduleNotesSave);
+  }
+
   // ── Event wiring ──────────────────────────────────────────────────────────
 
   if (takePhotoButton)   takePhotoButton.addEventListener("click",  function () { cameraInput?.click(); });
@@ -486,6 +584,7 @@
   // ── Init ──────────────────────────────────────────────────────────────────
 
   renderPage();
+  loadNotes();
 
   if (navigator.onLine) {
     setTimeout(flushQueue, 1200);

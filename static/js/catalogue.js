@@ -720,6 +720,24 @@
     if (scannerStatus) {
       scannerStatus.textContent = `Scanned ${barcode}. Searching...`;
     }
+
+    // Preflight: if the barcode resolves to exactly one SKU, jump straight to its detail page
+    try {
+      const preflightUrl = `/api/catalog/search?q=${encodeURIComponent(barcode)}&limit=2`;
+      const preflightRes = await fetch(preflightUrl);
+      if (preflightRes.ok) {
+        const preflightData = await preflightRes.json().catch(() => ({}));
+        const rows = Array.isArray(preflightData.results) ? preflightData.results : [];
+        if (rows.length === 1 && rows[0].sku) {
+          await closeScannerModal();
+          window.location.href = "/sku/" + encodeURIComponent(rows[0].sku);
+          return;
+        }
+      }
+    } catch (_) {
+      // Preflight failed — fall through to normal search
+    }
+
     if (skuInput) {
       skuInput.value = barcode;
     }

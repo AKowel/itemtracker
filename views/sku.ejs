@@ -90,6 +90,19 @@
       </section>
       <% } %>
 
+      <%# ── Notes ───────────────────────────────────────────────────────── %>
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Notes</p>
+            <h2>SKU notes</h2>
+          </div>
+          <span class="chip" id="notesSaveChip" hidden>Saved</span>
+        </div>
+        <textarea id="notesTextarea" class="sku-notes-textarea" placeholder="Add notes about this SKU — barcode quirks, discontinued info, anything useful…" rows="4"></textarea>
+        <p class="admin-sub" id="notesLastEdited" hidden></p>
+      </section>
+
     </div>
 
     <%# ── Right column — photos & upload ──────────────────────────────── %>
@@ -143,7 +156,7 @@
 </div>
 
 <script>
-  window.SKU_BOOTSTRAP = <%- safeJson({ sku }) %>;
+  window.SKU_BOOTSTRAP = <%- safeJson({ sku, isAdmin }) %>;
 </script>
 <script src="/static/js/sku.js?v=<%= assetVersion %>"></script>
 
