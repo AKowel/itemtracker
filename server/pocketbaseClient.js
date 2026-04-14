@@ -169,6 +169,14 @@ class PocketBaseClient {
     );
   }
 
+  async updateRecord(collectionName, recordId, payload) {
+    return this.adminRequest(
+      "PATCH",
+      `/api/collections/${encodeURIComponent(collectionName)}/records/${encodeURIComponent(recordId)}`,
+      { payload }
+    );
+  }
+
   async createMultipartRecord(collectionName, fields = {}, files = []) {
     const form = new FormData();
     for (const [key, value] of Object.entries(fields)) {

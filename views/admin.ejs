@@ -1,0 +1,93 @@
+<%- include("partials/head", { pageTitle, assetVersion }) %>
+<%- include("partials/header", { appName, currentUser, flash, bootstrapError: "" }) %>
+
+<main class="page-shell">
+
+  <section class="hero-card">
+    <div class="hero-card__copy">
+      <p class="eyebrow">Admin Panel</p>
+      <h1>User management</h1>
+      <div class="hero-card__chips">
+        <span class="chip" id="activeSessionsChip">Loading sessions…</span>
+        <span class="chip" id="totalUsersChip">Loading users…</span>
+      </div>
+    </div>
+  </section>
+
+  <%# ── Active sessions ─────────────────────────────────────────────────── %>
+  <section class="panel-card">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Currently online</p>
+        <h2>Active sessions</h2>
+        <p>Everyone with an active browser session right now. Last activity updates on each page request.</p>
+      </div>
+      <button type="button" id="logoutAllButton" class="admin-danger-button">Log everyone off</button>
+    </div>
+    <div id="sessionsTableWrap">
+      <p class="admin-loading">Loading…</p>
+    </div>
+  </section>
+
+  <%# ── All users ────────────────────────────────────────────────────────── %>
+  <section class="panel-card">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Accounts</p>
+        <h2>All users</h2>
+        <p>Reset a user's password or force-end their session from here.</p>
+      </div>
+    </div>
+    <div id="usersTableWrap">
+      <p class="admin-loading">Loading…</p>
+    </div>
+  </section>
+
+  <%# ── Activity log ────────────────────────────────────────────────────── %>
+  <section class="panel-card">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">History</p>
+        <h2>Activity log</h2>
+        <p>Logins, logouts, photo uploads, workbook imports and admin actions — most recent first.</p>
+      </div>
+      <span class="chip" id="activityCountChip">–</span>
+    </div>
+    <div id="activityTableWrap">
+      <p class="admin-loading">Loading…</p>
+    </div>
+  </section>
+
+</main>
+
+<%# ── Reset password modal ──────────────────────────────────────────────── %>
+<div id="resetModal" class="admin-modal" hidden>
+  <div class="admin-modal__panel">
+    <div class="admin-modal__head">
+      <div>
+        <p class="eyebrow">Reset password</p>
+        <strong id="resetModalTitle">Set a new password</strong>
+      </div>
+      <button type="button" class="ghost-button admin-modal__close" id="resetModalClose">Cancel</button>
+    </div>
+    <form id="resetPasswordForm" class="admin-modal__form">
+      <input type="hidden" id="resetUserId">
+      <label class="field">
+        <span>New password <em style="font-weight:400;color:var(--text-soft)">(min 8 characters)</em></span>
+        <input type="password" id="resetPasswordInput" placeholder="New password" autocomplete="new-password" minlength="8" required>
+      </label>
+      <label class="field">
+        <span>Confirm password</span>
+        <input type="password" id="resetPasswordConfirm" placeholder="Confirm password" autocomplete="new-password" minlength="8" required>
+      </label>
+      <div id="resetModalError" class="inline-alert inline-alert--error" hidden></div>
+      <div class="admin-modal__actions">
+        <button type="submit" id="resetSubmitButton">Set password</button>
+        <button type="button" class="ghost-button admin-modal__close">Cancel</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script src="/static/js/admin.js?v=<%= assetVersion %>"></script>
+<%- include("partials/footer", { assetVersion }) %>

@@ -47,6 +47,12 @@ async function createApp() {
   const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
   const assetVersion = Date.now().toString(36);
 
+  // ── Session tracking ─────────────────────────────────────────────────────
+  // activeSessions: Map<sessionId, { userId, email, name, loginAt, lastSeenAt, ip, userAgent }>
+  // invalidatedSessions: Set<sessionId> — sessions to kill on next request
+  const activeSessions = new Map();
+  const invalidatedSessions = new Set();
+
   let bootstrapError = "";
   try {
     await service.bootstrap();
@@ -102,7 +108,21 @@ async function createApp() {
       res.locals.currentUser = null;
       res.locals.assetVersion = assetVersion;
 
+      const sid = req.sessionID;
       const userId = req.session.userId;
+
+      // Honour forced logouts
+      if (sid && invalidatedSessions.has(sid)) {
+        invalidatedSessions.delete(sid);
+        activeSessions.delete(sid);
+        req.session.userId = null;
+        if (req.path.startsWith("/api/")) {
+          return res.status(401).json({ ok: false, error: "You have been signed out by an administrator." });
+        }
+        setFlash(req, "error", "You have been signed out by an administrator.");
+        return res.redirect("/login");
+      }
+
       if (!userId) {
         return next();
       }
@@ -111,7 +131,22 @@ async function createApp() {
         const user = await service.getUser(userId);
         req.currentUser = user;
         res.locals.currentUser = user;
+
+        // Update active session record
+        const existing = activeSessions.get(sid) || {};
+        activeSessions.set(sid, {
+          sessionId: sid,
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+          isAdmin: user.isAdmin,
+          loginAt: existing.loginAt || new Date().toISOString(),
+          lastSeenAt: new Date().toISOString(),
+          ip: req.ip || "",
+          userAgent: String(req.headers["user-agent"] || "").slice(0, 160)
+        });
       } catch (error) {
+        activeSessions.delete(sid);
         req.session.userId = null;
       }
 
@@ -122,6 +157,17 @@ async function createApp() {
   function requireLoginPage(req, res, next) {
     if (!req.currentUser) {
       return res.redirect("/login");
+    }
+    return next();
+  }
+
+  function requireAdminPage(req, res, next) {
+    if (!req.currentUser) {
+      return res.redirect("/login");
+    }
+    if (!req.currentUser.isAdmin) {
+      setFlash(req, "error", "Admin access required.");
+      return res.redirect("/catalogue");
     }
     return next();
   }
@@ -174,6 +220,19 @@ async function createApp() {
       try {
         const user = await service.authenticateUser(req.body.email, req.body.password);
         req.session.userId = user.id;
+        // Track session
+        activeSessions.set(req.sessionID, {
+          sessionId: req.sessionID,
+          userId: user.id,
+          email: user.email,
+          name: user.name,
+          isAdmin: user.isAdmin,
+          loginAt: new Date().toISOString(),
+          lastSeenAt: new Date().toISOString(),
+          ip: req.ip || "",
+          userAgent: String(req.headers["user-agent"] || "").slice(0, 160)
+        });
+        service.logActivity(user, "login", {}, req.ip || "");
         setFlash(req, "success", "Welcome back.");
         return res.redirect("/catalogue");
       } catch (error) {
@@ -184,6 +243,8 @@ async function createApp() {
   );
 
   app.post("/logout", requireLoginPage, (req, res) => {
+    service.logActivity(req.currentUser, "logout", {}, req.ip || "");
+    activeSessions.delete(req.sessionID);
     req.session.userId = null;
     setFlash(req, "success", "You have signed out.");
     return res.redirect("/login");
@@ -306,6 +367,7 @@ async function createApp() {
           originalName: req.file.originalname || "catalog.xlsx",
           user: req.currentUser
         });
+        service.logActivity(req.currentUser, "import_workbook", { source_name: meta.source_name, row_count: meta.row_count }, req.ip || "");
         return res.json({ ok: true, meta });
       } catch (error) {
         return jsonError(res, error, 400);
@@ -325,6 +387,7 @@ async function createApp() {
           files: req.files || [],
           user: req.currentUser
         });
+        service.logActivity(req.currentUser, "upload_images", { sku: req.body.sku, count: result.uploadedIds?.length || 0 }, req.ip || "");
         return res.json({ ok: true, ...result });
       } catch (error) {
         return jsonError(res, error, 400);
@@ -350,6 +413,104 @@ async function createApp() {
       res.setHeader("Cache-Control", "private, max-age=300");
       const buffer = Buffer.from(await response.arrayBuffer());
       return res.send(buffer);
+    })
+  );
+
+  // ── Admin page ──────────────────────────────────────────────────────────
+
+  app.get(
+    "/admin",
+    requireAdminPage,
+    asyncHandler(async (req, res) => {
+      return res.render("admin", {
+        pageTitle: `Admin | ${config.appName}`
+      });
+    })
+  );
+
+  app.get(
+    "/api/admin/sessions",
+    requireAdminApi,
+    (req, res) => {
+      const sessions = Array.from(activeSessions.values())
+        .sort((a, b) => new Date(b.lastSeenAt) - new Date(a.lastSeenAt));
+      return res.json({ ok: true, sessions });
+    }
+  );
+
+  app.get(
+    "/api/admin/users",
+    requireAdminApi,
+    asyncHandler(async (req, res) => {
+      const users = await service.listUsers();
+      return res.json({ ok: true, users });
+    })
+  );
+
+  app.get(
+    "/api/admin/activity",
+    requireAdminApi,
+    asyncHandler(async (req, res) => {
+      const limit = Math.min(500, Math.max(1, Number(req.query.limit || 200)));
+      const log = await service.getActivityLog(limit);
+      return res.json({ ok: true, log });
+    })
+  );
+
+  app.post(
+    "/api/admin/logout-user",
+    requireAdminApi,
+    (req, res) => {
+      const targetUserId = String(req.body.userId || "").trim();
+      if (!targetUserId) {
+        return res.status(400).json({ ok: false, error: "userId required." });
+      }
+      // Prevent admins locking themselves out
+      if (targetUserId === req.currentUser.id) {
+        return res.status(400).json({ ok: false, error: "You cannot force-logout yourself." });
+      }
+      let count = 0;
+      for (const [sid, session] of activeSessions.entries()) {
+        if (session.userId === targetUserId) {
+          invalidatedSessions.add(sid);
+          activeSessions.delete(sid);
+          count++;
+        }
+      }
+      service.logActivity(req.currentUser, "admin_force_logout", { target_user_id: targetUserId, sessions_ended: count }, req.ip || "");
+      return res.json({ ok: true, sessionsEnded: count });
+    }
+  );
+
+  app.post(
+    "/api/admin/logout-all",
+    requireAdminApi,
+    (req, res) => {
+      let count = 0;
+      for (const [sid, session] of activeSessions.entries()) {
+        if (session.userId !== req.currentUser.id) {
+          invalidatedSessions.add(sid);
+          activeSessions.delete(sid);
+          count++;
+        }
+      }
+      service.logActivity(req.currentUser, "admin_force_logout_all", { sessions_ended: count }, req.ip || "");
+      return res.json({ ok: true, sessionsEnded: count });
+    }
+  );
+
+  app.post(
+    "/api/admin/reset-password",
+    requireAdminApi,
+    asyncHandler(async (req, res) => {
+      const targetUserId = String(req.body.userId || "").trim();
+      const newPassword = String(req.body.password || "").trim();
+      if (!targetUserId || !newPassword) {
+        return res.status(400).json({ ok: false, error: "userId and password are required." });
+      }
+      await service.resetUserPassword(targetUserId, newPassword);
+      service.logActivity(req.currentUser, "admin_reset_password", { target_user_id: targetUserId }, req.ip || "");
+      return res.json({ ok: true });
     })
   );
 

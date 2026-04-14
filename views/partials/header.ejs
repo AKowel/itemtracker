@@ -6,6 +6,9 @@
     </a>
     <% if (currentUser) { %>
       <div class="site-header__actions">
+        <% if (currentUser.isAdmin) { %>
+          <a href="/admin" class="ghost-button site-header__admin-link">Admin</a>
+        <% } %>
         <div class="user-chip">
           <span><%= currentUser.name %></span>
           <strong><%= currentUser.isAdmin ? "Admin" : "User" %></strong>

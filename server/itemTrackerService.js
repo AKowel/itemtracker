@@ -12,6 +12,7 @@ const SNAPSHOT_COLLECTION = "item_catalog_snapshots";
 const IMAGE_COLLECTION = "item_catalog_images";
 const BARCODE_SNAPSHOT_COLLECTION = "item_catalog_barcode_snapshots";
 const WAREHOUSE_SNAPSHOT_COLLECTION = "warehouse_binloc_snapshots";
+const ACTIVITY_LOG_COLLECTION = "activity_log";
 const DEFAULT_CLIENT_CODE = "FANDMKET";
 const MAX_RESULTS = 60;
 const IMAGE_CACHE_TTL_MS = 60 * 1000;
@@ -319,6 +320,16 @@ class ItemTrackerService {
       { name: "snapshot_file", type: "file", required: true, maxSelect: 1, maxSize: 104857600 }
     ]);
     report.push(`${WAREHOUSE_SNAPSHOT_COLLECTION} ready`);
+
+    await this.ensureCollection(ACTIVITY_LOG_COLLECTION, [
+      { name: "user_id", type: "text", required: false, max: 64 },
+      { name: "user_email", type: "text", required: false, max: 255 },
+      { name: "user_name", type: "text", required: false, max: 255 },
+      { name: "action", type: "text", required: true, max: 64 },
+      { name: "detail", type: "json", required: false },
+      { name: "ip_address", type: "text", required: false, max: 64 }
+    ]);
+    report.push(`${ACTIVITY_LOG_COLLECTION} ready`);
 
     return report;
   }
@@ -1151,6 +1162,53 @@ class ItemTrackerService {
 
   async proxyImage({ imageId, collectionKey, fileName }) {
     return this.pb.proxyFile(collectionKey, imageId, fileName);
+  }
+
+  // ── Admin methods ────────────────────────────────────────────────────────
+
+  async listUsers() {
+    const response = await this.pb.listAllRecords(USERS_COLLECTION, { sort: "email" });
+    return (response || []).map((record) => this.serializeUser(record));
+  }
+
+  logActivity(user, action, detail = {}, ip = "") {
+    // Fire-and-forget — never let logging block or break a request
+    this.pb.createRecord(ACTIVITY_LOG_COLLECTION, {
+      user_id: user?.id || "",
+      user_email: user?.email || "",
+      user_name: user?.name || "",
+      action: String(action || ""),
+      detail,
+      ip_address: String(ip || "").slice(0, 64)
+    }).catch(() => {});
+  }
+
+  async getActivityLog(limit = 200) {
+    const response = await this.pb.listRecords(ACTIVITY_LOG_COLLECTION, {
+      sort: "-created",
+      page: 1,
+      perPage: Math.min(500, limit)
+    });
+    return (response.items || []).map((r) => ({
+      id: r.id,
+      user_id: r.user_id || "",
+      user_email: r.user_email || "",
+      user_name: r.user_name || "",
+      action: r.action || "",
+      detail: r.detail || {},
+      ip_address: r.ip_address || "",
+      created: r.created || ""
+    }));
+  }
+
+  async resetUserPassword(userId, newPassword) {
+    if (!userId || !newPassword || newPassword.length < 8) {
+      throw new PocketBaseError("Password must be at least 8 characters.", 400);
+    }
+    await this.pb.updateRecord(USERS_COLLECTION, userId, {
+      password: newPassword,
+      passwordConfirm: newPassword
+    });
   }
 }
 
