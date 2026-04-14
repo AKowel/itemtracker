@@ -250,6 +250,36 @@ async function createApp() {
   );
 
   app.get(
+    "/sku/:sku",
+    requireLoginPage,
+    asyncHandler(async (req, res) => {
+      const skuParam = String(req.params.sku || "").trim();
+      const detail = await service.getSkuDetail(skuParam);
+      if (!detail) {
+        setFlash(req, "error", `SKU "${skuParam}" was not found in the shared catalogue.`);
+        return res.redirect("/catalogue");
+      }
+      return res.render("sku", {
+        pageTitle: `${detail.sku} | ${config.appName}`,
+        sku: detail
+      });
+    })
+  );
+
+  app.get(
+    "/api/catalog/sku/:sku",
+    requireLoginApi,
+    asyncHandler(async (req, res) => {
+      const skuParam = String(req.params.sku || "").trim();
+      const detail = await service.getSkuDetail(skuParam);
+      if (!detail) {
+        return res.status(404).json({ ok: false, error: "SKU not found." });
+      }
+      return res.json({ ok: true, sku: detail });
+    })
+  );
+
+  app.get(
     "/api/catalog/location-search",
     requireAdminApi,
     asyncHandler(async (req, res) => {

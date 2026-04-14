@@ -794,6 +794,64 @@ class ItemTrackerService {
     return { rows, meta };
   }
 
+  async getSkuDetail(sku, clientCode = DEFAULT_CLIENT_CODE) {
+    const normalizedSku = normalizeSku(sku);
+    if (!normalizedSku) return null;
+
+    const { snapshot, meta } = await this.loadSnapshot(clientCode);
+    if (!snapshot) return null;
+
+    try {
+      const barcodeState = await this.loadBarcodeSnapshot(clientCode);
+      this.applyBarcodeSnapshot(snapshot, barcodeState.snapshot);
+    } catch (_) {}
+
+    const item = (snapshot.items || []).find((i) => normalizeSku(i?.sku) === normalizedSku);
+    if (!item) return null;
+
+    const imageState = await this.loadImageIndex(clientCode);
+    const images = (imageState.imageMap || new Map()).get(normalizedSku) || [];
+
+    let warehouseActive = false;
+    const binLocations = [];
+    try {
+      const warehouseState = await this.loadWarehouseSnapshot();
+      const skuSet = this.buildWarehouseSkuSet(warehouseState.snapshot, clientCode);
+      warehouseActive = skuSet.has(normalizedSku);
+      const targetClient = String(clientCode || DEFAULT_CLIENT_CODE).trim().toUpperCase();
+      for (const row of warehouseState.snapshot?.rows || []) {
+        const rowSku = normalizeSku(row?.BLITEM || row?.["Item SKU"] || row?.sku);
+        if (rowSku !== normalizedSku) continue;
+        const client = String(row?.BLCCOD || row?.Client || row?.client_code || "").trim().toUpperCase();
+        if (targetClient && client && client !== targetClient) continue;
+        const loc = String(row?.BLBINL || row?.["Bin Location"] || row?.bin_location || "").trim().toUpperCase();
+        if (!loc) continue;
+        const status = String(row?.BLSTS || "").trim().toUpperCase();
+        if (status && status !== "Y") continue;
+        const qty = row?.BLQTY !== undefined && row?.BLQTY !== null ? String(row.BLQTY) : null;
+        binLocations.push({ location: loc, qty });
+      }
+    } catch (_) {}
+
+    const barcodes = mergeBarcodeValues(item?.barcode, item?.barcodes || []);
+    return {
+      sku: normalizedSku,
+      description: item.description || item.description_short || "",
+      description_short: item.description_short || "",
+      barcode: barcodes[0] || "",
+      barcodes,
+      size: item.size || "",
+      color: item.color || "",
+      active: item.active !== false,
+      images,
+      image_count: images.length,
+      has_images: images.length > 0,
+      warehouse_active: warehouseActive,
+      bin_locations: binLocations,
+      catalog_meta: meta
+    };
+  }
+
   async searchByLocation(location, clientCode = DEFAULT_CLIENT_CODE) {
     const query = String(location || "").trim().toUpperCase();
     if (!query) {

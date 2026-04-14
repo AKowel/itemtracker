@@ -292,6 +292,29 @@
         ? `Latest PI-App warehouse upload at ${data.warehouse_uploaded_at}`
         : "Waiting for the latest PI-App warehouse upload";
     }
+
+    // Stale snapshot warning — flag the card if the snapshot is more than 2 days old
+    const snapshotCard = document.getElementById("warehouseSnapshotCard");
+    if (snapshotCard) {
+      const snapshotDate = String(data.warehouse_snapshot_date || "").trim();
+      let isStale = false;
+      if (snapshotDate) {
+        const msPerDay = 24 * 60 * 60 * 1000;
+        const snapshotMs = new Date(snapshotDate).getTime();
+        if (!isNaN(snapshotMs)) {
+          isStale = Date.now() - snapshotMs > 2 * msPerDay;
+        }
+      } else {
+        isStale = true; // No snapshot at all is also stale
+      }
+      snapshotCard.classList.toggle("metric-card--stale", isStale);
+      if (isStale && warehouseSnapshotMetricNote) {
+        const current = warehouseSnapshotMetricNote.textContent;
+        if (!current.includes("out of date") && !current.includes("Waiting")) {
+          warehouseSnapshotMetricNote.textContent = current + " — may be out of date";
+        }
+      }
+    }
   }
 
   function canLoadSummary() {
@@ -423,7 +446,10 @@
                 <p>${escapeHtml(row.description || row.description_short || "")}</p>
                 ${barcodeLine}
               </div>
-              <span class="chip">${images.length} refs</span>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:8px;">
+                <span class="chip">${images.length} refs</span>
+                <a href="/sku/${encodeURIComponent(safeSku)}" class="ghost-button" style="font-size:0.82rem;padding:7px 14px;white-space:nowrap;">View detail</a>
+              </div>
             </div>
             <div class="result-badges">
               ${badges.map((badge) => `<span class="result-badge">${escapeHtml(badge)}</span>`).join("")}

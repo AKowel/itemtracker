@@ -969,3 +969,135 @@ body.lightbox-open {
 .toast__message {
   line-height: 1.35;
 }
+
+/* ── Chip variants ────────────────────────────────────────────────────────── */
+
+.chip--active {
+  background: rgba(45, 122, 72, 0.14);
+  color: #1e5c38;
+}
+
+.chip--inactive {
+  background: rgba(173, 63, 63, 0.12);
+  color: var(--error);
+}
+
+/* ── Stale snapshot warning on metric card ────────────────────────────────── */
+
+.metric-card--stale {
+  border-color: rgba(216, 139, 56, 0.5) !important;
+  background: linear-gradient(180deg, rgba(255, 248, 236, 0.95), rgba(255, 242, 218, 0.88)) !important;
+}
+
+.metric-card--stale strong {
+  color: #7a4a0a;
+}
+
+.metric-card--stale span {
+  color: #9a6318;
+}
+
+.metric-card--stale .eyebrow::before {
+  content: "⚠ ";
+}
+
+/* ── SKU detail page ──────────────────────────────────────────────────────── */
+
+.sku-back-row {
+  display: flex;
+  align-items: center;
+}
+
+.sku-back-link {
+  font-size: 0.9rem;
+}
+
+.sku-detail-grid {
+  display: grid;
+  grid-template-columns: 340px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.sku-info-stack {
+  display: grid;
+  gap: 18px;
+}
+
+/* Barcode list */
+.sku-barcode-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.sku-barcode-code {
+  display: inline-block;
+  padding: 7px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.9);
+  font-family: "Courier New", Courier, monospace;
+  font-size: 0.95rem;
+  color: var(--brand-strong);
+  letter-spacing: 0.05em;
+}
+
+/* Bin location list */
+.sku-bin-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 8px;
+}
+
+.sku-bin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.sku-bin-loc {
+  font-size: 1rem;
+  font-family: "Courier New", Courier, monospace;
+  letter-spacing: 0.04em;
+  color: var(--brand-strong);
+}
+
+.sku-bin-qty {
+  font-size: 0.88rem;
+  color: var(--text-soft);
+  font-weight: 700;
+}
+
+/* Photos grid — larger thumbnails than the catalogue card */
+.sku-photos-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.sku-photos-grid .photo-card img,
+.sku-photos-grid .photo-card--button img {
+  border-radius: 18px;
+}
+
+/* ── SKU detail responsive ────────────────────────────────────────────────── */
+
+@media (max-width: 860px) {
+  .sku-detail-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .sku-photos-grid {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  }
+}

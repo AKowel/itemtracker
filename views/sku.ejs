@@ -1,0 +1,150 @@
+<%- include("partials/head", { pageTitle, assetVersion }) %>
+<%- include("partials/header", { appName, currentUser, flash, bootstrapError: "" }) %>
+
+<main class="page-shell">
+
+  <div class="sku-back-row">
+    <a href="/catalogue" class="ghost-button sku-back-link">&#8592; Back to catalogue</a>
+  </div>
+
+  <section class="hero-card">
+    <div class="hero-card__copy">
+      <p class="eyebrow">SKU Detail</p>
+      <h1><%= sku.sku %></h1>
+      <% if (sku.description) { %>
+        <p><%= sku.description %></p>
+      <% } %>
+      <div class="hero-card__chips">
+        <span class="chip" id="photoCountChip">
+          <%= sku.image_count %> photo<%= sku.image_count === 1 ? "" : "s" %>
+        </span>
+        <span class="chip <%= sku.warehouse_active ? "chip--active" : "" %>">
+          <%= sku.warehouse_active ? "Active in warehouse" : "Not in warehouse" %>
+        </span>
+        <span class="chip <%= sku.active ? "" : "chip--inactive" %>">
+          <%= sku.active ? "Active" : "Inactive" %>
+        </span>
+        <% if (sku.size) { %>
+          <span class="chip">Size <%= sku.size %></span>
+        <% } %>
+        <% if (sku.color) { %>
+          <span class="chip">Colour <%= sku.color %></span>
+        <% } %>
+      </div>
+    </div>
+  </section>
+
+  <div class="sku-detail-grid">
+
+    <%# ── Left column — identifiers & warehouse ────────────────────────── %>
+    <div class="sku-info-stack">
+
+      <% if (sku.barcodes && sku.barcodes.length) { %>
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Identifiers</p>
+            <h2>Known barcodes</h2>
+          </div>
+          <span class="chip"><%= sku.barcodes.length %></span>
+        </div>
+        <ul class="sku-barcode-list">
+          <% sku.barcodes.forEach(function(barcode) { %>
+            <li><code class="sku-barcode-code"><%= barcode %></code></li>
+          <% }) %>
+        </ul>
+      </section>
+      <% } %>
+
+      <% if (sku.bin_locations && sku.bin_locations.length) { %>
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Warehouse</p>
+            <h2>Bin locations</h2>
+          </div>
+          <span class="chip"><%= sku.bin_locations.length %> bin<%= sku.bin_locations.length === 1 ? "" : "s" %></span>
+        </div>
+        <ul class="sku-bin-list">
+          <% sku.bin_locations.forEach(function(bin) { %>
+            <li class="sku-bin-row">
+              <strong class="sku-bin-loc"><%= bin.location %></strong>
+              <% if (bin.qty !== null && bin.qty !== undefined) { %>
+                <span class="sku-bin-qty">Qty: <%= bin.qty %></span>
+              <% } %>
+            </li>
+          <% }) %>
+        </ul>
+      </section>
+      <% } %>
+
+      <% if (!sku.barcodes.length && !sku.bin_locations.length) { %>
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Identifiers</p>
+            <h2>No extra data</h2>
+            <p>No barcodes or warehouse bins are linked to this SKU yet. They appear here once PI-App has synced.</p>
+          </div>
+        </div>
+      </section>
+      <% } %>
+
+    </div>
+
+    <%# ── Right column — photos & upload ──────────────────────────────── %>
+    <section class="panel-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Reference Photos</p>
+          <h2>Images for <%= sku.sku %></h2>
+        </div>
+      </div>
+
+      <div class="sku-photos-grid" id="photosGrid">
+        <%# Rendered by sku.js on load %>
+      </div>
+
+      <div class="upload-box">
+        <div class="upload-row upload-row--stacked">
+          <input type="text" id="captionInput" placeholder="Optional caption for this batch">
+          <div class="upload-actions">
+            <button type="button" id="takePhotoButton">Take Photo</button>
+            <button type="button" class="ghost-button" id="addMoreButton">Add More</button>
+            <button type="button" id="finalizeButton" disabled>Finalize Upload</button>
+            <button type="button" class="ghost-button" id="clearStagingButton" disabled>Clear</button>
+          </div>
+          <input type="file" id="cameraInput" accept="image/*" capture="environment" style="display:none">
+          <input type="file" id="galleryInput" accept="image/*" multiple style="display:none">
+        </div>
+        <div id="uploadTray" hidden></div>
+        <p class="photo-help" id="photoHelp">
+          Take a photo to start a staging tray. Nothing uploads until you press Finalize Upload.
+        </p>
+      </div>
+    </section>
+
+  </div><%# end .sku-detail-grid %>
+
+</main>
+
+<%# ── Lightbox ───────────────────────────────────────────────────────────── %>
+<div id="imageLightbox" class="lightbox" hidden>
+  <button type="button" class="lightbox__close" id="lightboxClose" aria-label="Close image viewer">&times;</button>
+  <button type="button" class="lightbox__nav" id="lightboxPrev" aria-label="Previous image">Previous</button>
+  <figure class="lightbox__frame">
+    <img id="lightboxImage" src="" alt="">
+    <figcaption class="lightbox__caption">
+      <strong id="lightboxTitle"></strong>
+      <span id="lightboxText"></span>
+    </figcaption>
+  </figure>
+  <button type="button" class="lightbox__nav" id="lightboxNext" aria-label="Next image">Next</button>
+</div>
+
+<script>
+  window.SKU_BOOTSTRAP = <%- safeJson({ sku }) %>;
+</script>
+<script src="/static/js/sku.js?v=<%= assetVersion %>"></script>
+
+<%- include("partials/footer", { assetVersion }) %>
