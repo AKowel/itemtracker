@@ -1478,6 +1478,18 @@ body.lightbox-open {
   min-width: 180px;
 }
 
+.heatmap-scene-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.heatmap-fullscreen-button {
+  white-space: nowrap;
+}
+
 .heatmap-layout {
   display: grid;
   grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.9fr);
@@ -1505,6 +1517,36 @@ body.lightbox-open {
 
 #heatmapCanvas:active {
   cursor: grabbing;
+}
+
+.heatmap-scene-hint {
+  position: absolute;
+  left: 18px;
+  bottom: 18px;
+  display: none;
+  gap: 4px;
+  max-width: 320px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  background: rgba(9, 15, 28, 0.82);
+  border: 1px solid rgba(145, 181, 255, 0.22);
+  backdrop-filter: blur(12px);
+  color: rgba(236, 244, 255, 0.94);
+}
+
+.heatmap-scene-hint strong {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.heatmap-scene-hint span {
+  line-height: 1.45;
+  color: rgba(236, 244, 255, 0.82);
+}
+
+.heatmap-scene-hint code {
+  font-size: 12px;
 }
 
 .heatmap-legend {
@@ -1663,6 +1705,52 @@ body.lightbox-open {
 
 .heatmap-hot-aisle span {
   color: var(--text-1);
+}
+
+.heatmap-layout:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  padding: 16px;
+  box-sizing: border-box;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+  gap: 16px;
+  align-items: stretch;
+  background:
+    radial-gradient(circle at top, rgba(67, 108, 181, 0.2), transparent 35%),
+    linear-gradient(180deg, #08111c 0%, #0c1728 100%);
+}
+
+.heatmap-layout:fullscreen .heatmap-scene-card,
+.heatmap-layout:fullscreen .heatmap-sidebar {
+  height: calc(100vh - 32px);
+}
+
+.heatmap-layout:fullscreen .heatmap-scene-card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.heatmap-layout:fullscreen .heatmap-scene-wrap {
+  min-height: 0;
+  height: 100%;
+}
+
+.heatmap-layout:fullscreen #heatmapCanvas {
+  height: 100%;
+}
+
+.heatmap-layout:fullscreen .heatmap-sidebar {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  overflow: auto;
+  background: rgba(9, 16, 28, 0.92);
+  border-color: rgba(145, 181, 255, 0.18);
+  backdrop-filter: blur(14px);
+}
+
+.heatmap-layout:fullscreen .heatmap-scene-hint {
+  display: grid;
 }
 
 @media (max-width: 1100px) {

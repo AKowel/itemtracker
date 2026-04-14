@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const doc = typeof document !== "undefined" ? document : null;
+const layoutRoot = doc?.getElementById("heatmapLayout") || null;
 const canvas = doc?.getElementById("heatmapCanvas") || null;
 const modeSelect = doc?.getElementById("heatmapModeSelect") || null;
 const dateField = doc?.getElementById("heatmapDateField") || null;
@@ -14,6 +15,7 @@ const metricSelect = doc?.getElementById("heatmapMetricSelect") || null;
 const searchInput = doc?.getElementById("heatmapSearchInput") || null;
 const pickedOnlyToggle = doc?.getElementById("heatmapPickedOnly") || null;
 const occupiedOnlyToggle = doc?.getElementById("heatmapOccupiedOnly") || null;
+const fullscreenButton = doc?.getElementById("heatmapFullscreenButton") || null;
 const reloadButton = doc?.getElementById("heatmapReloadButton") || null;
 const statusChip = doc?.getElementById("heatmapStatusChip") || null;
 const dateChip = doc?.getElementById("heatmapDateChip") || null;
@@ -32,7 +34,8 @@ const state = {
   rows: [],
   selectedLocation: "",
   sceneRows: [],
-  aisleCoords: new Map()
+  aisleCoords: new Map(),
+  isFullscreen: false
 };
 
 const sceneState = {
@@ -45,7 +48,9 @@ const sceneState = {
   pointer: new THREE.Vector2(),
   selectionBox: null,
   labelGroup: null,
-  floorGroup: null
+  floorGroup: null,
+  movementKeys: new Set(),
+  lastFrameAt: 0
 };
 
 function escapeHtml(value) {
@@ -69,6 +74,20 @@ function setStatus(message, type) {
   if (!statusChip) return;
   statusChip.textContent = message || "Ready";
   statusChip.classList.toggle("chip--inactive", type !== "ok");
+}
+
+function isFullscreenActive() {
+  return Boolean(layoutRoot && document.fullscreenElement === layoutRoot);
+}
+
+function isEditableElement(target) {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  if (target.isContentEditable) {
+    return true;
+  }
+  return ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName);
 }
 
 function buildAisleCoords(layout, rows) {
@@ -157,18 +176,18 @@ function makeTextSprite(label) {
 }
 
 function initScene() {
-  if (sceneState.renderer) return;
+  if (sceneState.renderer || !canvas) return;
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-  renderer.setSize(canvas.clientWidth || canvas.parentElement.clientWidth, 620, false);
+  renderer.setSize(canvas.clientWidth || canvas.parentElement.clientWidth || 1200, canvas.clientHeight || 620, false);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#0b1523");
   scene.fog = new THREE.Fog("#0b1523", 55, 220);
 
-  const camera = new THREE.PerspectiveCamera(52, (canvas.clientWidth || 1200) / 620, 0.1, 1000);
+  const camera = new THREE.PerspectiveCamera(52, (canvas.clientWidth || 1200) / (canvas.clientHeight || 620), 0.1, 1000);
   camera.position.set(38, 42, 58);
 
   const controls = new OrbitControls(camera, renderer.domElement);
@@ -221,7 +240,7 @@ function initScene() {
 }
 
 function resizeScene() {
-  if (!sceneState.renderer || !sceneState.camera) return;
+  if (!sceneState.renderer || !sceneState.camera || !canvas) return;
   const width = canvas.clientWidth || canvas.parentElement.clientWidth || 1200;
   const height = canvas.clientHeight || 620;
   sceneState.renderer.setSize(width, height, false);
@@ -229,9 +248,56 @@ function resizeScene() {
   sceneState.camera.updateProjectionMatrix();
 }
 
-function animate() {
+function updateKeyboardMovement(deltaSeconds) {
+  if (!sceneState.camera || !sceneState.controls || !isFullscreenActive()) {
+    return;
+  }
+  if (!sceneState.movementKeys.size || isEditableElement(document.activeElement)) {
+    return;
+  }
+
+  const forward = new THREE.Vector3();
+  sceneState.camera.getWorldDirection(forward);
+  forward.y = 0;
+  if (forward.lengthSq() === 0) {
+    return;
+  }
+  forward.normalize();
+
+  const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+  const movement = new THREE.Vector3();
+
+  if (sceneState.movementKeys.has("KeyW")) {
+    movement.add(forward);
+  }
+  if (sceneState.movementKeys.has("KeyS")) {
+    movement.sub(forward);
+  }
+  if (sceneState.movementKeys.has("KeyD")) {
+    movement.add(right);
+  }
+  if (sceneState.movementKeys.has("KeyA")) {
+    movement.sub(right);
+  }
+  if (movement.lengthSq() === 0) {
+    return;
+  }
+
+  movement.normalize().multiplyScalar(Math.max(8, 18 * deltaSeconds));
+  sceneState.camera.position.add(movement);
+  sceneState.controls.target.add(movement);
+}
+
+function animate(frameAt = 0) {
   requestAnimationFrame(animate);
   if (!sceneState.renderer) return;
+
+  const now = frameAt || performance.now();
+  const previous = sceneState.lastFrameAt || now;
+  const deltaSeconds = Math.min(0.08, Math.max(0.001, (now - previous) / 1000));
+  sceneState.lastFrameAt = now;
+
+  updateKeyboardMovement(deltaSeconds);
   sceneState.controls.update();
   sceneState.renderer.render(sceneState.scene, sceneState.camera);
 }
@@ -243,14 +309,17 @@ function clearSceneContent() {
     sceneState.rackMesh.material.dispose();
     sceneState.rackMesh = null;
   }
-  sceneState.labelGroup.clear();
-  sceneState.floorGroup.clear();
-  sceneState.selectionBox.visible = false;
+  sceneState.labelGroup?.clear();
+  sceneState.floorGroup?.clear();
+  if (sceneState.selectionBox) {
+    sceneState.selectionBox.visible = false;
+  }
   state.sceneRows = [];
 }
 
 function buildScene(rows, layout, metricKey) {
   clearSceneContent();
+  if (!sceneState.scene) return;
 
   const coords = buildAisleCoords(layout, rows);
   state.aisleCoords = coords;
@@ -266,7 +335,7 @@ function buildScene(rows, layout, metricKey) {
 
   const dummy = new THREE.Object3D();
   rows.forEach((row, index) => {
-    const aisle = coords.get(row.aisle_prefix) || { x: 0, zoneIndex: 0 };
+    const aisle = coords.get(row.aisle_prefix) || { x: 0 };
     const bayNumber = Number.parseInt(row.bay || "0", 10) || 0;
     const levelNumber = Number.parseInt(row.level || "0", 10) || 0;
     const slotNumber = Number.parseInt(row.slot || "1", 10) || 1;
@@ -321,7 +390,7 @@ function buildScene(rows, layout, metricKey) {
 }
 
 function fitCamera(rows) {
-  if (!rows.length) return;
+  if (!rows.length || !sceneState.camera || !sceneState.controls) return;
   const xs = state.sceneRows.map((row) => row._position.x);
   const ys = state.sceneRows.map((row) => row._position.y);
   const zs = state.sceneRows.map((row) => row._position.z);
@@ -341,9 +410,9 @@ function fitCamera(rows) {
 
 function getFilteredRows() {
   if (!state.heatmap?.rows) return [];
-  const q = String(searchInput.value || "").trim().toUpperCase();
-  const pickedOnly = pickedOnlyToggle.checked;
-  const occupiedOnly = occupiedOnlyToggle.checked;
+  const q = String(searchInput?.value || "").trim().toUpperCase();
+  const pickedOnly = Boolean(pickedOnlyToggle?.checked);
+  const occupiedOnly = Boolean(occupiedOnlyToggle?.checked);
   return state.heatmap.rows.filter((row) => {
     if (pickedOnly && !(Number(row.pick_count || 0) > 0 || Number(row.pick_qty || 0) > 0)) {
       return false;
@@ -372,6 +441,7 @@ function renderHotAisles(rows) {
     if (row.sku) item.occupied += 1;
     byAisle.set(aisle, item);
   });
+
   const hottest = Array.from(byAisle.values())
     .sort((a, b) => (b.pick_count - a.pick_count) || (b.pick_qty - a.pick_qty))
     .slice(0, 8);
@@ -435,6 +505,7 @@ function renderSnapshotInfo(meta = {}) {
 
 function renderStats(rows) {
   if (!occupiedMetric || !pickedMetric || !locationChip || !pickChip || !dateChip) return;
+
   const meta = state.heatmap?.meta || {};
   const occupied = rows.filter((row) => row.sku).length;
   const picked = rows.filter((row) => Number(row.pick_count || 0) > 0 || Number(row.pick_qty || 0) > 0).length;
@@ -517,7 +588,7 @@ async function renderSelection(row) {
     ? `<a class="ghost-button" href="/sku/${encodeURIComponent(row.sku)}">Open SKU</a>`
     : "";
   const topSkuHtml = Array.isArray(row.top_skus) && row.top_skus.length
-    ? `<div class="heatmap-top-skus">${row.top_skus.map((item) => `<span class="chip chip--inactive">${escapeHtml(item.sku)} · ${Number(item.pick_count || 0)} picks</span>`).join("")}</div>`
+    ? `<div class="heatmap-top-skus">${row.top_skus.map((item) => `<span class="chip chip--inactive">${escapeHtml(item.sku)} - ${Number(item.pick_count || 0)} picks</span>`).join("")}</div>`
     : '<p class="heatmap-detail-muted">No picked SKU activity recorded for this location in the selected view.</p>';
 
   detailCard.innerHTML = `
@@ -529,10 +600,10 @@ async function renderSelection(row) {
       ${currentSkuLink}
     </div>
     <div class="heatmap-detail-grid">
-      <div><span>Aisle</span><strong>${escapeHtml(row.aisle_prefix || "—")}</strong></div>
-      <div><span>Bay</span><strong>${escapeHtml(row.bay || "—")}</strong></div>
-      <div><span>Level</span><strong>${escapeHtml(row.level || "—")}</strong></div>
-      <div><span>Slot</span><strong>${escapeHtml(row.slot || "—")}</strong></div>
+      <div><span>Aisle</span><strong>${escapeHtml(row.aisle_prefix || "-")}</strong></div>
+      <div><span>Bay</span><strong>${escapeHtml(row.bay || "-")}</strong></div>
+      <div><span>Level</span><strong>${escapeHtml(row.level || "-")}</strong></div>
+      <div><span>Slot</span><strong>${escapeHtml(row.slot || "-")}</strong></div>
       <div><span>Pick count</span><strong>${Number(row.pick_count || 0).toLocaleString()}</strong></div>
       <div><span>Pick qty</span><strong>${Number(row.pick_qty || 0).toLocaleString()}</strong></div>
     </div>
@@ -540,7 +611,7 @@ async function renderSelection(row) {
       <p class="eyebrow">Current SKU</p>
       <strong>${escapeHtml(row.sku || "Empty location")}</strong>
       <p>${escapeHtml(row.description || "No current SKU description available.")}</p>
-      <span class="heatmap-detail-muted">Bin quantity: ${Number(row.qty || 0).toLocaleString()} · Photos: ${Number(row.image_count || 0).toLocaleString()}</span>
+      <span class="heatmap-detail-muted">Bin quantity: ${Number(row.qty || 0).toLocaleString()} - Photos: ${Number(row.image_count || 0).toLocaleString()}</span>
     </div>
     <div class="heatmap-detail-copy">
       <p class="eyebrow">Top Picked SKUs In This Location</p>
@@ -558,7 +629,7 @@ function applyFilters() {
   const rows = getFilteredRows();
   state.rows = rows;
   renderStats(rows);
-  buildScene(rows, state.heatmap.layout, metricSelect.value);
+  buildScene(rows, state.heatmap.layout, metricSelect?.value || "pick_count");
 
   if (state.selectedLocation) {
     const selected = rows.find((row) => row.location === state.selectedLocation) || null;
@@ -567,65 +638,29 @@ function applyFilters() {
       renderSelection(null);
     }
   }
+
   setStatus(`${rows.length.toLocaleString()} locations in view`, "ok");
 }
 
-function legacyUpdateDateOptions(availableDates, selectedDate) {
-  if (!dateSelect) return;
-  const current = dateSelect.value;
-  dateSelect.innerHTML = '<option value="">Latest available</option>';
-  const dates = Array.from(new Set((availableDates || []).filter(Boolean)));
-  dates.forEach((date) => {
-    const option = document.createElement("option");
-    option.value = date;
-    option.textContent = date;
-    dateSelect.appendChild(option);
-  });
-  dateSelect.value = selectedDate || current || "";
-}
-
-async function legacyLoadHeatmap() {
-  setStatus("Loading heatmap…");
-  try {
-    const query = dateSelect.value ? `?date=${encodeURIComponent(dateSelect.value)}` : "";
-    const data = await apiFetch(`/api/admin/picking-heatmap${query}`);
-    state.heatmap = data.heatmap || { rows: [], layout: { zones: [] }, meta: {}, stats: {} };
-    updateDateOptions(state.heatmap.meta?.available_pick_dates || [], state.heatmap.meta?.pick_snapshot_date || "");
-    applyFilters();
-  } catch (error) {
-    setStatus("Could not load heatmap");
-    renderSelectionPlaceholder(error.message || "Could not load the picking heatmap.");
-    hotAislesWrap.innerHTML = '<p class="admin-empty">Could not load aisle heat data.</p>';
-    window.ItemTracker?.toast(error.message || "Could not load the picking heatmap", "error");
-  }
-}
-
 function handleSceneClick(event) {
-  if (!canvas) return;
-  if (!sceneState.rackMesh || !state.sceneRows.length) return;
+  if (!canvas || !sceneState.rackMesh || !state.sceneRows.length) return;
   const rect = canvas.getBoundingClientRect();
   sceneState.pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
   sceneState.pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
   sceneState.raycaster.setFromCamera(sceneState.pointer, sceneState.camera);
   const hits = sceneState.raycaster.intersectObject(sceneState.rackMesh);
   if (!hits.length) return;
+
   const hit = hits[0];
   const row = state.sceneRows[hit.instanceId];
   if (!row) return;
-  state.selectedLocation = row.location;
-  sceneState.selectionBox.visible = true;
-  sceneState.selectionBox.position.set(row._position.x, row._position.y, row._position.z);
-  renderSelection(row);
-}
 
-function legacyWireEvents() {
-  if (!dateSelect || !metricSelect || !searchInput || !pickedOnlyToggle || !occupiedOnlyToggle || !reloadButton) return;
-  dateSelect.addEventListener("change", loadHeatmap);
-  metricSelect.addEventListener("change", applyFilters);
-  searchInput.addEventListener("input", applyFilters);
-  pickedOnlyToggle.addEventListener("change", applyFilters);
-  occupiedOnlyToggle.addEventListener("change", applyFilters);
-  reloadButton.addEventListener("click", loadHeatmap);
+  state.selectedLocation = row.location;
+  if (sceneState.selectionBox) {
+    sceneState.selectionBox.visible = true;
+    sceneState.selectionBox.position.set(row._position.x, row._position.y, row._position.z);
+  }
+  renderSelection(row);
 }
 
 function updateDateOptions(availableDates, selectedDate) {
@@ -641,12 +676,14 @@ function updateDateOptions(availableDates, selectedDate) {
     dateSelect.value = "";
     return;
   }
+
   dates.forEach((date) => {
     const option = document.createElement("option");
     option.value = date;
     option.textContent = date;
     dateSelect.appendChild(option);
   });
+
   const resolved = selectedDate || current || dates[0] || "";
   dateSelect.value = dates.includes(resolved) ? resolved : dates[0];
 }
@@ -744,8 +781,57 @@ async function loadHeatmap() {
   }
 }
 
+function refreshFullscreenState() {
+  state.isFullscreen = isFullscreenActive();
+  if (layoutRoot) {
+    layoutRoot.classList.toggle("is-fullscreen", state.isFullscreen);
+  }
+  if (fullscreenButton) {
+    fullscreenButton.textContent = state.isFullscreen ? "Exit full screen" : "Full screen";
+  }
+  if (!state.isFullscreen) {
+    sceneState.movementKeys.clear();
+  }
+  window.setTimeout(resizeScene, 40);
+}
+
+async function toggleFullscreen() {
+  if (!layoutRoot) return;
+  try {
+    if (isFullscreenActive()) {
+      await document.exitFullscreen();
+    } else {
+      await layoutRoot.requestFullscreen();
+    }
+  } catch (error) {
+    window.ItemTracker?.toast(error.message || "Could not toggle full screen", "error");
+  }
+}
+
+function handleKeyDown(event) {
+  if (!isFullscreenActive()) {
+    return;
+  }
+  if (isEditableElement(event.target)) {
+    return;
+  }
+  if (!["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) {
+    return;
+  }
+  event.preventDefault();
+  sceneState.movementKeys.add(event.code);
+}
+
+function handleKeyUp(event) {
+  if (!["KeyW", "KeyA", "KeyS", "KeyD"].includes(event.code)) {
+    return;
+  }
+  sceneState.movementKeys.delete(event.code);
+}
+
 function wireEvents() {
   if (!metricSelect || !searchInput || !pickedOnlyToggle || !occupiedOnlyToggle || !reloadButton) return;
+
   modeSelect?.addEventListener("change", () => {
     syncModeUi();
     loadHeatmap();
@@ -765,16 +851,23 @@ function wireEvents() {
       loadHeatmap();
     }
   });
+
   metricSelect.addEventListener("change", applyFilters);
   searchInput.addEventListener("input", applyFilters);
   pickedOnlyToggle.addEventListener("change", applyFilters);
   occupiedOnlyToggle.addEventListener("change", applyFilters);
   reloadButton.addEventListener("click", loadHeatmap);
+  fullscreenButton?.addEventListener("click", toggleFullscreen);
+
+  document.addEventListener("fullscreenchange", refreshFullscreenState);
+  document.addEventListener("keydown", handleKeyDown);
+  document.addEventListener("keyup", handleKeyUp);
 }
 
 if (canvas) {
   initScene();
   syncModeUi();
+  refreshFullscreenState();
   wireEvents();
   loadHeatmap();
 }

@@ -8,8 +8,8 @@
       <h1>Picking Heatmap</h1>
       <p>View live warehouse locations in 3D, colour them by pick activity, and click any location to inspect the current SKU, photos, and heat details.</p>
       <div class="hero-card__chips">
-        <span class="chip" id="heatmapDateChip">Loading snapshots…</span>
-        <span class="chip" id="heatmapSnapshotStatusChip">Checking snapshot status…</span>
+        <span class="chip" id="heatmapDateChip">Loading snapshots...</span>
+        <span class="chip" id="heatmapSnapshotStatusChip">Checking snapshot status...</span>
         <span class="chip" id="heatmapLocationChip">0 locations</span>
         <span class="chip" id="heatmapPickChip">0 picks</span>
       </div>
@@ -72,7 +72,7 @@
     </div>
   </section>
 
-  <section class="heatmap-layout">
+  <section class="heatmap-layout" id="heatmapLayout">
     <section class="panel-card heatmap-scene-card">
       <div class="panel-head">
         <div>
@@ -80,10 +80,17 @@
           <h2>Warehouse Rack View</h2>
           <p>Drag to orbit, scroll to zoom, and click a cube to inspect that location.</p>
         </div>
-        <span class="chip chip--inactive" id="heatmapStatusChip">Loading…</span>
+        <div class="heatmap-scene-actions">
+          <button type="button" class="ghost-button heatmap-fullscreen-button" id="heatmapFullscreenButton">Full screen</button>
+          <span class="chip chip--inactive" id="heatmapStatusChip">Loading...</span>
+        </div>
       </div>
       <div class="heatmap-scene-wrap">
         <canvas id="heatmapCanvas"></canvas>
+        <div class="heatmap-scene-hint" id="heatmapSceneHint">
+          <strong>Full screen controls</strong>
+          <span><code>W A S D</code> move the camera, mouse drag orbits, scroll zooms, <code>Esc</code> exits.</span>
+        </div>
         <div class="heatmap-legend">
           <div class="heatmap-legend__bar"></div>
           <div class="heatmap-legend__labels">
@@ -113,12 +120,12 @@
         <article class="metric-card">
           <p class="eyebrow">Picked</p>
           <strong id="heatmapPickedMetric">0</strong>
-          <span>locations active on the selected date</span>
+          <span>locations active in the selected view</span>
         </article>
       </div>
 
       <div id="heatmapSnapshotInfo" class="heatmap-snapshot-info">
-        <strong>Checking snapshot availability…</strong>
+        <strong>Checking snapshot availability...</strong>
       </div>
 
       <div id="heatmapDetailCard" class="heatmap-detail-card">
@@ -132,7 +139,7 @@
         </div>
       </div>
       <div id="heatmapHotAisles" class="heatmap-hot-aisles">
-        <p class="admin-loading">Loading…</p>
+        <p class="admin-loading">Loading...</p>
       </div>
     </aside>
   </section>
