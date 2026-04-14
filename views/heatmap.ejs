@@ -9,6 +9,7 @@
       <p>View live warehouse locations in 3D, colour them by pick activity, and click any location to inspect the current SKU, photos, and heat details.</p>
       <div class="hero-card__chips">
         <span class="chip" id="heatmapDateChip">Loading snapshots…</span>
+        <span class="chip" id="heatmapSnapshotStatusChip">Checking snapshot status…</span>
         <span class="chip" id="heatmapLocationChip">0 locations</span>
         <span class="chip" id="heatmapPickChip">0 picks</span>
       </div>
@@ -20,15 +21,33 @@
       <div>
         <p class="eyebrow">Controls</p>
         <h2>Scene Filters</h2>
-        <p>Choose a published pick snapshot date and narrow the scene to the most useful locations.</p>
+        <p>Choose a published pick day or range and narrow the scene to the most useful locations.</p>
       </div>
     </div>
     <div class="heatmap-toolbar">
       <label class="field">
+        <span>View mode</span>
+        <select id="heatmapModeSelect">
+          <option value="latest">Latest day</option>
+          <option value="date">Specific date</option>
+          <option value="last_7">Last week</option>
+          <option value="last_30">Last month</option>
+          <option value="custom">Custom range</option>
+        </select>
+      </label>
+      <label class="field" id="heatmapDateField" hidden>
         <span>Pick snapshot date</span>
         <select id="heatmapDateSelect">
-          <option value="">Latest available</option>
+          <option value="">No snapshots yet</option>
         </select>
+      </label>
+      <label class="field" id="heatmapStartField" hidden>
+        <span>Start date</span>
+        <input type="date" id="heatmapStartDate">
+      </label>
+      <label class="field" id="heatmapEndField" hidden>
+        <span>End date</span>
+        <input type="date" id="heatmapEndDate">
       </label>
       <label class="field">
         <span>Heat metric</span>
@@ -98,6 +117,10 @@
         </article>
       </div>
 
+      <div id="heatmapSnapshotInfo" class="heatmap-snapshot-info">
+        <strong>Checking snapshot availability…</strong>
+      </div>
+
       <div id="heatmapDetailCard" class="heatmap-detail-card">
         <strong class="heatmap-detail-card__empty">No location selected yet.</strong>
       </div>
@@ -119,6 +142,14 @@
   window.ITEMTRACKER_HEATMAP_BOOTSTRAP = <%- safeJson({
     currentUser
   }) %>;
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three/build/three.module.js",
+    "three/addons/": "/vendor/three/examples/jsm/"
+  }
+}
 </script>
 <script type="module" src="/static/js/heatmap.js?v=<%= assetVersion %>"></script>
 

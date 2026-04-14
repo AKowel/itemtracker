@@ -60,6 +60,31 @@ function safeNumber(value) {
   return num;
 }
 
+function parseDateText(value) {
+  const text = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return null;
+  }
+  const parsed = new Date(`${text}T00:00:00Z`);
+  if (Number.isNaN(parsed.getTime())) {
+    return null;
+  }
+  return parsed;
+}
+
+function formatDateText(dateValue) {
+  if (!(dateValue instanceof Date) || Number.isNaN(dateValue.getTime())) {
+    return "";
+  }
+  return dateValue.toISOString().slice(0, 10);
+}
+
+function addUtcDays(dateValue, offset) {
+  const next = new Date(dateValue.getTime());
+  next.setUTCDate(next.getUTCDate() + offset);
+  return next;
+}
+
 function normalizeExcelCellValue(value) {
   if (value === null || value === undefined) {
     return "";
@@ -758,7 +783,7 @@ class ItemTrackerService {
     return payload;
   }
 
-  async listPickActivitySnapshotRecords(clientCode = DEFAULT_CLIENT_CODE, limit = 31) {
+  async listPickActivitySnapshotRecords(clientCode = DEFAULT_CLIENT_CODE, limit = 120) {
     const response = await this.pb.listRecords(PICK_ACTIVITY_SNAPSHOT_COLLECTION, {
       filterExpr: `client_code=${pbFilterLiteral(clientCode)}`,
       sort: "-snapshot_date,-uploaded_at",
@@ -853,16 +878,207 @@ class ItemTrackerService {
     };
   }
 
-  async getPickingHeatmap(clientCode = DEFAULT_CLIENT_CODE, snapshotDate = "") {
+  resolvePickSnapshotRange(pickRecords, options = {}) {
+    const availableDates = (pickRecords || [])
+      .map((record) => String(record?.snapshot_date || "").trim())
+      .filter(Boolean)
+      .sort((a, b) => String(b).localeCompare(String(a)));
+    const availableDateSet = new Set(availableDates);
+    const latestAvailableDate = availableDates[0] || "";
+    const mode = String(options.mode || "").trim().toLowerCase() || "latest";
+
+    if (!latestAvailableDate) {
+      return {
+        mode,
+        availableDates,
+        latestAvailableDate: "",
+        requestedDates: [],
+        matchedDates: [],
+        missingDates: [],
+        requestedStartDate: "",
+        requestedEndDate: "",
+        resolvedStartDate: "",
+        resolvedEndDate: ""
+      };
+    }
+
+    let requestedStartDate = "";
+    let requestedEndDate = "";
+    if (mode === "date") {
+      requestedStartDate = String(options.snapshotDate || "").trim() || latestAvailableDate;
+      requestedEndDate = requestedStartDate;
+    } else if (mode === "custom") {
+      requestedStartDate = String(options.startDate || "").trim();
+      requestedEndDate = String(options.endDate || "").trim();
+      if (!requestedStartDate && requestedEndDate) {
+        requestedStartDate = requestedEndDate;
+      }
+      if (!requestedEndDate && requestedStartDate) {
+        requestedEndDate = requestedStartDate;
+      }
+      if (!requestedStartDate || !requestedEndDate) {
+        requestedStartDate = latestAvailableDate;
+        requestedEndDate = latestAvailableDate;
+      }
+    } else if (mode === "last_30") {
+      requestedEndDate = latestAvailableDate;
+      const end = parseDateText(latestAvailableDate) || new Date();
+      requestedStartDate = formatDateText(addUtcDays(end, -29));
+    } else if (mode === "last_7") {
+      requestedEndDate = latestAvailableDate;
+      const end = parseDateText(latestAvailableDate) || new Date();
+      requestedStartDate = formatDateText(addUtcDays(end, -6));
+    } else {
+      requestedStartDate = latestAvailableDate;
+      requestedEndDate = latestAvailableDate;
+    }
+
+    let startDate = parseDateText(requestedStartDate);
+    let endDate = parseDateText(requestedEndDate);
+    if (!startDate && endDate) {
+      startDate = new Date(endDate.getTime());
+    }
+    if (!endDate && startDate) {
+      endDate = new Date(startDate.getTime());
+    }
+    if (!startDate || !endDate) {
+      startDate = parseDateText(latestAvailableDate) || new Date();
+      endDate = new Date(startDate.getTime());
+    }
+    if (startDate > endDate) {
+      const temp = startDate;
+      startDate = endDate;
+      endDate = temp;
+    }
+
+    const requestedDates = [];
+    for (let cursor = new Date(startDate.getTime()); cursor <= endDate; cursor = addUtcDays(cursor, 1)) {
+      requestedDates.push(formatDateText(cursor));
+    }
+
+    return {
+      mode,
+      availableDates,
+      latestAvailableDate,
+      requestedDates,
+      matchedDates: requestedDates.filter((date) => availableDateSet.has(date)),
+      missingDates: requestedDates.filter((date) => !availableDateSet.has(date)),
+      requestedStartDate,
+      requestedEndDate,
+      resolvedStartDate: formatDateText(startDate),
+      resolvedEndDate: formatDateText(endDate)
+    };
+  }
+
+  async getPickingHeatmap(clientCode = DEFAULT_CLIENT_CODE, options = {}) {
     const targetClient = String(clientCode || DEFAULT_CLIENT_CODE).trim().toUpperCase();
-    const [layoutManifest, warehouseState, pickState, pickRecords, catalogState, imageState] = await Promise.all([
+    const [layoutManifest, warehouseState, pickRecords, catalogState, imageState] = await Promise.all([
       this.loadLayoutManifest(),
       this.loadWarehouseSnapshot(),
-      this.loadPickActivitySnapshot(snapshotDate, targetClient),
-      this.listPickActivitySnapshotRecords(targetClient, 31).catch(() => []),
+      this.listPickActivitySnapshotRecords(targetClient, 120).catch(() => []),
       this.loadSnapshot(targetClient).catch(() => ({ snapshot: null, meta: this.snapshotMeta(null, "none") })),
       this.loadImageIndex(targetClient).catch(() => ({ imageMap: new Map(), imageSkuSet: new Set(), imageRecordCount: 0 }))
     ]);
+
+    const range = this.resolvePickSnapshotRange(pickRecords, {
+      mode: options.mode,
+      snapshotDate: options.snapshotDate,
+      startDate: options.startDate,
+      endDate: options.endDate
+    });
+
+    let pickState = { snapshot: null, meta: pickActivitySnapshotMeta(null, "none") };
+    let pickRows = [];
+    let pickLoadedDates = [];
+    if (range.matchedDates.length) {
+      const snapshots = await Promise.all(
+        range.matchedDates.map((date) => this.loadPickActivitySnapshot(date, targetClient))
+      );
+      const byLocation = new Map();
+      let totalPickCount = 0;
+      let totalPickQty = 0;
+      for (const snapshotState of snapshots) {
+        const snapshot = snapshotState?.snapshot || null;
+        if (!snapshot) {
+          continue;
+        }
+        pickLoadedDates.push(String(snapshot.snapshot_date || snapshotState?.meta?.snapshot_date || "").trim());
+        totalPickCount += Number(snapshot.total_pick_count || 0);
+        totalPickQty += safeNumber(snapshot.total_pick_qty || 0);
+        for (const row of snapshot.rows || []) {
+          const location = String(row?.location || "").trim().toUpperCase();
+          if (!location) {
+            continue;
+          }
+          const existing = byLocation.get(location) || {
+            location,
+            aisle_prefix: String(row?.aisle_prefix || "").trim().toUpperCase(),
+            bay: String(row?.bay || "").trim(),
+            level: String(row?.level || "").trim(),
+            slot: String(row?.slot || "").trim(),
+            pick_count: 0,
+            pick_qty: 0,
+            picker_count: 0,
+            _topSkuMap: new Map()
+          };
+          existing.pick_count += Number(row?.pick_count || 0);
+          existing.pick_qty += safeNumber(row?.pick_qty || 0);
+          existing.picker_count = Math.max(existing.picker_count, Number(row?.picker_count || 0));
+          for (const skuRow of row?.top_skus || []) {
+            const sku = normalizeSku(skuRow?.sku);
+            if (!sku) {
+              continue;
+            }
+            const skuExisting = existing._topSkuMap.get(sku) || { sku, pick_count: 0, pick_qty: 0, picker_count: 0 };
+            skuExisting.pick_count += Number(skuRow?.pick_count || 0);
+            skuExisting.pick_qty += safeNumber(skuRow?.pick_qty || 0);
+            skuExisting.picker_count = Math.max(skuExisting.picker_count, Number(skuRow?.picker_count || 0));
+            existing._topSkuMap.set(sku, skuExisting);
+          }
+          byLocation.set(location, existing);
+        }
+      }
+      pickRows = Array.from(byLocation.values()).map((row) => ({
+        location: row.location,
+        aisle_prefix: row.aisle_prefix,
+        bay: row.bay,
+        level: row.level,
+        slot: row.slot,
+        pick_count: row.pick_count,
+        pick_qty: row.pick_qty,
+        picker_count: row.picker_count,
+        top_skus: Array.from(row._topSkuMap.values())
+          .sort((a, b) => (b.pick_count - a.pick_count) || (b.pick_qty - a.pick_qty) || String(a.sku).localeCompare(String(b.sku)))
+          .slice(0, 5)
+      }));
+
+      pickState = {
+        snapshot: {
+          warehouse_code: snapshots[0]?.snapshot?.warehouse_code || "",
+          client_code: targetClient,
+          snapshot_date: range.resolvedEndDate || range.latestAvailableDate,
+          requested_start_date: range.resolvedStartDate,
+          requested_end_date: range.resolvedEndDate,
+          range_mode: range.mode,
+          row_count: pickRows.length,
+          total_pick_count: totalPickCount,
+          total_pick_qty: totalPickQty,
+          rows: pickRows
+        },
+        meta: {
+          available: true,
+          source: "pocketbase",
+          warehouse_code: snapshots[0]?.meta?.warehouse_code || "",
+          client_code: targetClient,
+          snapshot_date: range.resolvedEndDate || range.latestAvailableDate,
+          row_count: pickRows.length,
+          total_pick_count: totalPickCount,
+          total_pick_qty: totalPickQty,
+          uploaded_at: snapshots[0]?.meta?.uploaded_at || "",
+          source_synced_at: snapshots[0]?.meta?.source_synced_at || ""
+        }
+      };
+    }
 
     let barcodeSnapshot = null;
     try {
@@ -883,7 +1099,6 @@ class ItemTrackerService {
     }
 
     const imageMap = imageState.imageMap || new Map();
-    const pickRows = pickState?.snapshot?.rows || [];
     const pickMap = new Map();
     for (const row of pickRows) {
       const key = String(row?.location || "").trim().toUpperCase();
@@ -1011,7 +1226,15 @@ class ItemTrackerService {
         client_code: targetClient,
         warehouse_snapshot_date: warehouseState?.meta?.snapshot_date || "",
         pick_snapshot_date: pickState?.meta?.snapshot_date || "",
-        available_pick_dates: (pickRecords || []).map((record) => String(record.snapshot_date || "")).filter(Boolean),
+        available_pick_dates: range.availableDates,
+        pick_loaded_dates: pickLoadedDates,
+        pick_range_mode: range.mode,
+        pick_requested_start_date: range.resolvedStartDate,
+        pick_requested_end_date: range.resolvedEndDate,
+        pick_requested_day_count: range.requestedDates.length,
+        pick_available_day_count: range.matchedDates.length,
+        pick_missing_dates: range.missingDates,
+        latest_pick_snapshot_date: range.latestAvailableDate,
         pick_snapshot_meta: pickState?.meta || pickActivitySnapshotMeta(null, "none"),
         item_catalog_meta: catalogState?.meta || this.snapshotMeta(null, "none")
       },

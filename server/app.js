@@ -518,8 +518,12 @@ async function createApp() {
     "/api/admin/picking-heatmap",
     requireAdminApi,
     asyncHandler(async (req, res) => {
-      const snapshotDate = String(req.query.date || "").trim();
-      const heatmap = await service.getPickingHeatmap(undefined, snapshotDate);
+      const heatmap = await service.getPickingHeatmap(undefined, {
+        mode: String(req.query.mode || "").trim(),
+        snapshotDate: String(req.query.date || "").trim(),
+        startDate: String(req.query.start || "").trim(),
+        endDate: String(req.query.end || "").trim()
+      });
       return res.json({ ok: true, heatmap });
     })
   );

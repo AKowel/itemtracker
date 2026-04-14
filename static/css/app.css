@@ -1547,6 +1547,24 @@ body.lightbox-open {
   gap: 12px;
 }
 
+.heatmap-snapshot-info {
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid color-mix(in srgb, var(--line) 74%, white);
+  background: color-mix(in srgb, var(--surface-alt) 72%, white);
+}
+
+.heatmap-snapshot-info strong {
+  font-size: 15px;
+}
+
+.heatmap-snapshot-info span {
+  color: var(--text-1);
+  line-height: 1.45;
+}
+
 .heatmap-detail-card {
   display: grid;
   gap: 14px;

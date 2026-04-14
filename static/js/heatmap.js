@@ -1,9 +1,15 @@
-import * as THREE from "/vendor/three/build/three.module.js";
-import { OrbitControls } from "/vendor/three/examples/jsm/controls/OrbitControls.js";
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
 const doc = typeof document !== "undefined" ? document : null;
 const canvas = doc?.getElementById("heatmapCanvas") || null;
+const modeSelect = doc?.getElementById("heatmapModeSelect") || null;
+const dateField = doc?.getElementById("heatmapDateField") || null;
 const dateSelect = doc?.getElementById("heatmapDateSelect") || null;
+const startField = doc?.getElementById("heatmapStartField") || null;
+const endField = doc?.getElementById("heatmapEndField") || null;
+const startDateInput = doc?.getElementById("heatmapStartDate") || null;
+const endDateInput = doc?.getElementById("heatmapEndDate") || null;
 const metricSelect = doc?.getElementById("heatmapMetricSelect") || null;
 const searchInput = doc?.getElementById("heatmapSearchInput") || null;
 const pickedOnlyToggle = doc?.getElementById("heatmapPickedOnly") || null;
@@ -11,10 +17,12 @@ const occupiedOnlyToggle = doc?.getElementById("heatmapOccupiedOnly") || null;
 const reloadButton = doc?.getElementById("heatmapReloadButton") || null;
 const statusChip = doc?.getElementById("heatmapStatusChip") || null;
 const dateChip = doc?.getElementById("heatmapDateChip") || null;
+const snapshotStatusChip = doc?.getElementById("heatmapSnapshotStatusChip") || null;
 const locationChip = doc?.getElementById("heatmapLocationChip") || null;
 const pickChip = doc?.getElementById("heatmapPickChip") || null;
 const occupiedMetric = doc?.getElementById("heatmapOccupiedMetric") || null;
 const pickedMetric = doc?.getElementById("heatmapPickedMetric") || null;
+const snapshotInfo = doc?.getElementById("heatmapSnapshotInfo") || null;
 const detailCard = doc?.getElementById("heatmapDetailCard") || null;
 const detailHint = doc?.getElementById("heatmapDetailHint") || null;
 const hotAislesWrap = doc?.getElementById("heatmapHotAisles") || null;
@@ -382,17 +390,98 @@ function renderHotAisles(rows) {
   )).join("");
 }
 
+function renderSnapshotInfo(meta = {}) {
+  if (!snapshotInfo) return;
+
+  const availableDates = Array.isArray(meta.available_pick_dates) ? meta.available_pick_dates.filter(Boolean) : [];
+  const loadedDates = Array.isArray(meta.pick_loaded_dates) ? meta.pick_loaded_dates.filter(Boolean) : [];
+  const missingDates = Array.isArray(meta.pick_missing_dates) ? meta.pick_missing_dates.filter(Boolean) : [];
+  const latestDate = String(meta.latest_pick_snapshot_date || "").trim();
+  const requestedStart = String(meta.pick_requested_start_date || "").trim();
+  const requestedEnd = String(meta.pick_requested_end_date || "").trim();
+  const snapshotMeta = meta.pick_snapshot_meta || {};
+  const uploadedAt = String(snapshotMeta.uploaded_at || "").trim();
+  const sourceSyncedAt = String(snapshotMeta.source_synced_at || "").trim();
+
+  if (!availableDates.length) {
+    snapshotInfo.innerHTML = [
+      "<strong>No pick snapshots published yet.</strong>",
+      "<span>The heatmap is ready, but PocketBase does not have any published pick-day files yet.</span>",
+      "<span>Restart the PI-App sync machine or wait for the daily snapshot publish to complete.</span>"
+    ].join("");
+    return;
+  }
+
+  const requestedLabel =
+    requestedStart && requestedEnd
+      ? requestedStart === requestedEnd
+        ? requestedStart
+        : `${requestedStart} to ${requestedEnd}`
+      : latestDate || "Latest available day";
+  const missingLabel = missingDates.length
+    ? missingDates.slice(0, 6).join(", ") + (missingDates.length > 6 ? ` +${missingDates.length - 6} more` : "")
+    : "None";
+
+  snapshotInfo.innerHTML = [
+    `<strong>Requested range: ${escapeHtml(requestedLabel)}</strong>`,
+    `<span>Available pick days: ${availableDates.length.toLocaleString()} total.</span>`,
+    `<span>Loaded into this view: ${loadedDates.length.toLocaleString()} day(s).</span>`,
+    `<span>Latest published day: ${escapeHtml(latestDate || "Unknown")}.</span>`,
+    `<span>Missing from this range: ${escapeHtml(missingLabel)}.</span>`,
+    uploadedAt ? `<span>Last uploaded to PocketBase: ${escapeHtml(uploadedAt)}.</span>` : "",
+    sourceSyncedAt ? `<span>Source synced from PI-App: ${escapeHtml(sourceSyncedAt)}.</span>` : ""
+  ].filter(Boolean).join("");
+}
+
 function renderStats(rows) {
   if (!occupiedMetric || !pickedMetric || !locationChip || !pickChip || !dateChip) return;
+  const meta = state.heatmap?.meta || {};
   const occupied = rows.filter((row) => row.sku).length;
   const picked = rows.filter((row) => Number(row.pick_count || 0) > 0 || Number(row.pick_qty || 0) > 0).length;
   const picks = rows.reduce((sum, row) => sum + Number(row.pick_count || 0), 0);
+  const rangeMode = String(meta.pick_range_mode || "latest").trim().toLowerCase();
+  const requestedStart = String(meta.pick_requested_start_date || "").trim();
+  const requestedEnd = String(meta.pick_requested_end_date || "").trim();
+  const latestDate = String(meta.latest_pick_snapshot_date || meta.pick_snapshot_date || meta.warehouse_snapshot_date || "").trim();
+  const availableDates = Array.isArray(meta.available_pick_dates) ? meta.available_pick_dates.filter(Boolean) : [];
+  const missingDates = Array.isArray(meta.pick_missing_dates) ? meta.pick_missing_dates.filter(Boolean) : [];
+  const availableDayCount = Number(meta.pick_available_day_count || 0);
+
   occupiedMetric.textContent = occupied.toLocaleString();
   pickedMetric.textContent = picked.toLocaleString();
   locationChip.textContent = `${rows.length.toLocaleString()} locations`;
   pickChip.textContent = `${picks.toLocaleString()} picks`;
-  const snapshotDate = state.heatmap?.meta?.pick_snapshot_date || state.heatmap?.meta?.warehouse_snapshot_date || "No snapshot";
-  dateChip.textContent = snapshotDate ? `Snapshot ${snapshotDate}` : "No snapshot";
+
+  if (!availableDates.length) {
+    dateChip.textContent = "No pick snapshots yet";
+  } else if (rangeMode !== "latest" && requestedStart && requestedEnd) {
+    dateChip.textContent =
+      requestedStart === requestedEnd
+        ? `Snapshot ${requestedStart}`
+        : `${requestedStart} to ${requestedEnd}`;
+  } else if (latestDate) {
+    dateChip.textContent = `Snapshot ${latestDate}`;
+  } else {
+    dateChip.textContent = "Snapshot unavailable";
+  }
+
+  if (snapshotStatusChip) {
+    if (!availableDates.length) {
+      snapshotStatusChip.textContent = "Waiting for snapshots";
+      snapshotStatusChip.classList.add("chip--inactive");
+    } else if (missingDates.length) {
+      snapshotStatusChip.textContent = `${availableDayCount}/${Math.max(availableDayCount, Number(meta.pick_requested_day_count || 0))} days loaded`;
+      snapshotStatusChip.classList.remove("chip--inactive");
+    } else if (availableDayCount > 1) {
+      snapshotStatusChip.textContent = `${availableDayCount} days loaded`;
+      snapshotStatusChip.classList.remove("chip--inactive");
+    } else {
+      snapshotStatusChip.textContent = "1 day loaded";
+      snapshotStatusChip.classList.remove("chip--inactive");
+    }
+  }
+
+  renderSnapshotInfo(meta);
   renderHotAisles(rows);
 }
 
@@ -429,7 +518,7 @@ async function renderSelection(row) {
     : "";
   const topSkuHtml = Array.isArray(row.top_skus) && row.top_skus.length
     ? `<div class="heatmap-top-skus">${row.top_skus.map((item) => `<span class="chip chip--inactive">${escapeHtml(item.sku)} · ${Number(item.pick_count || 0)} picks</span>`).join("")}</div>`
-    : '<p class="heatmap-detail-muted">No picked SKU activity recorded for this location on the selected date.</p>';
+    : '<p class="heatmap-detail-muted">No picked SKU activity recorded for this location in the selected view.</p>';
 
   detailCard.innerHTML = `
     <div class="heatmap-detail-head">
@@ -481,7 +570,7 @@ function applyFilters() {
   setStatus(`${rows.length.toLocaleString()} locations in view`, "ok");
 }
 
-function updateDateOptions(availableDates, selectedDate) {
+function legacyUpdateDateOptions(availableDates, selectedDate) {
   if (!dateSelect) return;
   const current = dateSelect.value;
   dateSelect.innerHTML = '<option value="">Latest available</option>';
@@ -495,7 +584,7 @@ function updateDateOptions(availableDates, selectedDate) {
   dateSelect.value = selectedDate || current || "";
 }
 
-async function loadHeatmap() {
+async function legacyLoadHeatmap() {
   setStatus("Loading heatmap…");
   try {
     const query = dateSelect.value ? `?date=${encodeURIComponent(dateSelect.value)}` : "";
@@ -529,7 +618,7 @@ function handleSceneClick(event) {
   renderSelection(row);
 }
 
-function wireEvents() {
+function legacyWireEvents() {
   if (!dateSelect || !metricSelect || !searchInput || !pickedOnlyToggle || !occupiedOnlyToggle || !reloadButton) return;
   dateSelect.addEventListener("change", loadHeatmap);
   metricSelect.addEventListener("change", applyFilters);
@@ -539,8 +628,153 @@ function wireEvents() {
   reloadButton.addEventListener("click", loadHeatmap);
 }
 
+function updateDateOptions(availableDates, selectedDate) {
+  if (!dateSelect) return;
+  const current = dateSelect.value;
+  dateSelect.innerHTML = "";
+  const dates = Array.from(new Set((availableDates || []).filter(Boolean)));
+  if (!dates.length) {
+    const option = document.createElement("option");
+    option.value = "";
+    option.textContent = "No snapshots yet";
+    dateSelect.appendChild(option);
+    dateSelect.value = "";
+    return;
+  }
+  dates.forEach((date) => {
+    const option = document.createElement("option");
+    option.value = date;
+    option.textContent = date;
+    dateSelect.appendChild(option);
+  });
+  const resolved = selectedDate || current || dates[0] || "";
+  dateSelect.value = dates.includes(resolved) ? resolved : dates[0];
+}
+
+function syncModeUi() {
+  if (!modeSelect) return;
+  const mode = String(modeSelect.value || "latest").trim().toLowerCase();
+  const showDate = mode === "date";
+  const showCustomRange = mode === "custom";
+
+  if (dateField) {
+    dateField.hidden = !showDate;
+  }
+  if (startField) {
+    startField.hidden = !showCustomRange;
+  }
+  if (endField) {
+    endField.hidden = !showCustomRange;
+  }
+}
+
+function buildHeatmapQuery() {
+  const params = new URLSearchParams();
+  const mode = String(modeSelect?.value || "latest").trim().toLowerCase() || "latest";
+  params.set("mode", mode);
+
+  if (mode === "date") {
+    const selectedDate = String(dateSelect?.value || "").trim();
+    if (selectedDate) {
+      params.set("date", selectedDate);
+    }
+  } else if (mode === "custom") {
+    const startDate = String(startDateInput?.value || "").trim();
+    const endDate = String(endDateInput?.value || "").trim();
+    if (startDate) {
+      params.set("start", startDate);
+    }
+    if (endDate) {
+      params.set("end", endDate);
+    }
+  }
+
+  const query = params.toString();
+  return query ? `?${query}` : "";
+}
+
+async function loadHeatmap() {
+  syncModeUi();
+  setStatus("Loading heatmap...");
+  try {
+    const query = buildHeatmapQuery();
+    const data = await apiFetch(`/api/admin/picking-heatmap${query}`);
+    state.heatmap = data.heatmap || { rows: [], layout: { zones: [] }, meta: {}, stats: {} };
+    const meta = state.heatmap.meta || {};
+    updateDateOptions(meta.available_pick_dates || [], meta.pick_snapshot_date || meta.latest_pick_snapshot_date || "");
+
+    if (startDateInput && meta.pick_requested_start_date) {
+      startDateInput.value = meta.pick_requested_start_date;
+    }
+    if (endDateInput && meta.pick_requested_end_date) {
+      endDateInput.value = meta.pick_requested_end_date;
+    }
+
+    applyFilters();
+
+    if (!Array.isArray(meta.available_pick_dates) || !meta.available_pick_dates.length) {
+      renderSelectionPlaceholder("No pick snapshots have been published yet. Restart the PI-App sync machine or wait for the next publish window.");
+      if (hotAislesWrap) {
+        hotAislesWrap.innerHTML = '<p class="admin-empty">No pick snapshots have been published yet.</p>';
+      }
+      setStatus("No pick snapshots available");
+      return;
+    }
+
+    if (Number(meta.pick_available_day_count || 0) === 0) {
+      renderSelectionPlaceholder("No pick snapshots match the selected day or range yet.");
+      if (hotAislesWrap) {
+        hotAislesWrap.innerHTML = '<p class="admin-empty">No pick snapshots match the selected range.</p>';
+      }
+      setStatus("No snapshots in selected range");
+      return;
+    }
+
+    if (!state.selectedLocation) {
+      renderSelection(null);
+    }
+  } catch (error) {
+    setStatus("Could not load heatmap");
+    renderSelectionPlaceholder(error.message || "Could not load the picking heatmap.");
+    renderSnapshotInfo({});
+    if (hotAislesWrap) {
+      hotAislesWrap.innerHTML = '<p class="admin-empty">Could not load aisle heat data.</p>';
+    }
+    window.ItemTracker?.toast(error.message || "Could not load the picking heatmap", "error");
+  }
+}
+
+function wireEvents() {
+  if (!metricSelect || !searchInput || !pickedOnlyToggle || !occupiedOnlyToggle || !reloadButton) return;
+  modeSelect?.addEventListener("change", () => {
+    syncModeUi();
+    loadHeatmap();
+  });
+  dateSelect?.addEventListener("change", () => {
+    if (String(modeSelect?.value || "latest").trim().toLowerCase() === "date") {
+      loadHeatmap();
+    }
+  });
+  startDateInput?.addEventListener("change", () => {
+    if (String(modeSelect?.value || "latest").trim().toLowerCase() === "custom") {
+      loadHeatmap();
+    }
+  });
+  endDateInput?.addEventListener("change", () => {
+    if (String(modeSelect?.value || "latest").trim().toLowerCase() === "custom") {
+      loadHeatmap();
+    }
+  });
+  metricSelect.addEventListener("change", applyFilters);
+  searchInput.addEventListener("input", applyFilters);
+  pickedOnlyToggle.addEventListener("change", applyFilters);
+  occupiedOnlyToggle.addEventListener("change", applyFilters);
+  reloadButton.addEventListener("click", loadHeatmap);
+}
+
 if (canvas) {
   initScene();
+  syncModeUi();
   wireEvents();
   loadHeatmap();
 }
