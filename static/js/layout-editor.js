@@ -19,10 +19,11 @@ overrides.locations         = overrides.locations         || {};
 overrides.virtual_locations = overrides.virtual_locations || [];
 overrides.bin_sizes         = overrides.bin_sizes         || {};
 
-let dirty        = false;
-let selMode      = "zone";   // "zone" | "bay" | "location"
-let selection    = null;     // { type, key, label }
-let warehouseLocs = null;    // full location list fetched from /api/admin/layout-locations
+let dirty         = false;
+let selMode       = "zone";   // "zone" | "bay" | "location"
+let selection     = null;     // { type, key, label }
+let warehouseLocs = null;     // full location list fetched from /api/admin/layout-locations
+let aisleMaxBay   = new Map();// prefix → maxBay (derived from warehouseLocs)
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const canvas            = document.getElementById("editorCanvas");
@@ -112,7 +113,9 @@ function computeZoneLayouts() {
     const reverseDir  = !!(ovr.reverse_bay_dir);
     const startX  = zoneOffsetX + xOffset;
     const width   = Math.max(visAisles.length - 1, 0) * aisleSpacing + 4;
-    const depth   = 30;
+    // Use real max-bay data when available, otherwise default
+    const zoneMaxBay = visAisles.reduce((m, a) => Math.max(m, aisleMaxBay.get(a.prefix) || 20), 20);
+    const depth   = Math.max(30, Math.ceil(zoneMaxBay / 2) * 2.4 + 8);
     const centerX = startX + width / 2 - 2;
     const centerZ = zOffset - depth / 2 + 4;
     result.push({ zone, key, active, visAisles, width, depth, centerX, centerZ, rotY, reverseDir });
@@ -146,12 +149,10 @@ function buildEditorScene() {
 
   if (zoneChip) zoneChip.textContent = zoneLayouts.length + " zone" + (zoneLayouts.length === 1 ? "" : "s");
 
-  if (selMode === "zone") {
-    buildZoneBlocks(zoneLayouts);
-  } else {
-    buildZoneBlocks(zoneLayouts, true); // wireframe-only in bay/location mode
-    buildLocationDots(aisleCoords);
-  }
+  // Always render zone slabs (solid in zone mode, wireframe overlay otherwise)
+  buildZoneBlocks(zoneLayouts, selMode !== "zone");
+  // Always render location blocks when data is loaded
+  if (warehouseLocs) buildLocationDots(aisleCoords);
 }
 
 function buildZoneBlocks(zoneLayouts, wireframeOnly = false) {
@@ -335,18 +336,18 @@ function initScene() {
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color("#0b1523");
-  scene.fog = new THREE.Fog("#0b1523", 80, 380);
+  scene.fog = new THREE.Fog("#0b1523", 120, 600);
 
-  const w = canvas.clientWidth || 900, h = canvas.clientHeight || 500;
-  const camera = new THREE.PerspectiveCamera(52, w / h, 0.1, 1000);
-  camera.position.set(60, 70, 90);
+  const w = canvas.clientWidth || 900, h = canvas.clientHeight || 700;
+  const camera = new THREE.PerspectiveCamera(52, w / h, 0.1, 1500);
+  camera.position.set(80, 90, 120);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
   controls.maxPolarAngle = Math.PI / 2.05;
   controls.minDistance   = 5;
-  controls.maxDistance   = 450;
+  controls.maxDistance   = 900;
 
   scene.add(new THREE.AmbientLight("#dce6ff", 1.2));
   const kl = new THREE.DirectionalLight("#ffffff", 1.1);
@@ -354,7 +355,7 @@ function initScene() {
   const fl = new THREE.DirectionalLight("#7ab4ff", 0.5);
   fl.position.set(-50, 40, -30); scene.add(fl);
 
-  const grid = new THREE.GridHelper(600, 120, "#24405d", "#162536");
+  const grid = new THREE.GridHelper(1200, 200, "#24405d", "#162536");
   grid.position.y = -0.7;
   scene.add(grid);
 
@@ -386,10 +387,12 @@ function fitCamera() {
   if (!sc.camera || !sc.controls) return;
   const zl = computeZoneLayouts();
   if (!zl.length) return;
-  const xs = zl.map(z => z.centerX);
-  const cx = (Math.min(...xs) + Math.max(...xs)) / 2;
-  sc.camera.position.set(cx + 60, 70, 90);
-  sc.controls.target.set(cx, 0, -14);
+  const xs   = zl.map(z => z.centerX);
+  const maxD = Math.max(...zl.map(z => z.depth));
+  const cx   = (Math.min(...xs) + Math.max(...xs)) / 2;
+  const dist = Math.max(120, maxD * 1.4);
+  sc.camera.position.set(cx + dist * 0.55, dist * 0.65, dist * 0.8);
+  sc.controls.target.set(cx, 0, -(maxD * 0.3));
   sc.controls.update();
 }
 
@@ -401,29 +404,39 @@ function handleCanvasClick(event) {
   sc.pointer.y = -((event.clientY - rect.top)  / rect.height) * 2 + 1;
   sc.raycaster.setFromCamera(sc.pointer, sc.camera);
 
-  // Collect all clickable meshes (zone slabs + instanced location meshes)
   const clickable = [];
   sc.zoneMeshes.forEach(m => clickable.push(m));
 
   const hits = sc.raycaster.intersectObjects(clickable, false);
   if (!hits.length) return;
 
-  const hit = hits[0];
-  const ud  = hit.object.userData;
+  // In zone mode: prefer zone-slab hits; in bay/location mode: prefer block hits
+  let zonHit = null, locHit = null;
+  for (const h of hits) {
+    if (!zonHit && h.object.userData.type === "zone")         zonHit = h;
+    if (!locHit && h.object.userData.instancedLocs)           locHit = h;
+    if (zonHit && locHit) break;
+  }
 
-  if (ud.type === "zone" && selMode === "zone") {
-    const zone = (layout.zones || []).find(z => z.zone_key === ud.key);
-    if (zone) selectItem("zone", ud.key, zone.zone_label || ud.key, zone);
+  if (selMode === "zone") {
+    const hit = zonHit || locHit;
+    if (!hit) return;
+    if (hit.object.userData.type === "zone") {
+      const zone = (layout.zones || []).find(z => z.zone_key === hit.object.userData.key);
+      if (zone) selectItem("zone", hit.object.userData.key, zone.zone_label || hit.object.userData.key, zone);
+    }
     return;
   }
 
-  // InstancedMesh hit — resolve which location was clicked via instanceId
-  if (ud.instancedLocs && hit.instanceId != null) {
-    const loc = ud.instancedLocs[hit.instanceId];
+  // Bay / location mode — prefer block hits, fall back to zone slab
+  const hit = locHit || zonHit;
+  if (!hit) return;
+  if (hit.object.userData.instancedLocs && hit.instanceId != null) {
+    const loc = hit.object.userData.instancedLocs[hit.instanceId];
     if (!loc) return;
     if (selMode === "bay") {
       selectItem("bay", loc.bayKey, loc.bayKey, null);
-    } else if (selMode === "location") {
+    } else {
       selectItem("location", loc.location, loc.location, null);
     }
   }
@@ -741,6 +754,13 @@ async function loadWarehouseLocations() {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !Array.isArray(data.locations)) throw new Error(data.error || "Failed to load");
     warehouseLocs = data.locations;
+    // Build max-bay map so zone floors get correct depth
+    aisleMaxBay = new Map();
+    for (const loc of warehouseLocs) {
+      const prefix = String(loc.aisle_prefix || "").toUpperCase();
+      const bay    = Number(loc.bay) || 0;
+      if (bay > (aisleMaxBay.get(prefix) || 0)) aisleMaxBay.set(prefix, bay);
+    }
     buildEditorScene(); // rebuild with full data
     if (hintTx) hintTx.textContent = selMode === "zone" ? "Click a zone to select" : "Click a block to select";
     if (hintEl) hintEl.hidden = false;
@@ -760,4 +780,15 @@ if (canvas) {
   wireControls();
   initScene();
   loadWarehouseLocations();
+
+  // Sidebar collapse/expand toggle
+  const sidebarEl = document.getElementById("editorSidebar");
+  const toggleBtn = document.getElementById("editorSidebarToggle");
+  if (toggleBtn && sidebarEl) {
+    toggleBtn.addEventListener("click", () => {
+      const collapsed = sidebarEl.classList.toggle("collapsed");
+      toggleBtn.classList.toggle("collapsed", collapsed);
+      toggleBtn.textContent = collapsed ? "Panel ◀" : "Panel ▶";
+    });
+  }
 }

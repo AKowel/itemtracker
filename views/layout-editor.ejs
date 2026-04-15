@@ -45,13 +45,12 @@
         <canvas id="editorCanvas"></canvas>
         <div class="layout-editor-hint" id="editorHint">
           <strong id="editorHintText">Click a zone to select</strong>
-          <span>Drag to orbit · scroll to zoom</span>
+          <span>Drag to orbit · scroll to zoom · WASD to move</span>
         </div>
-      </div>
-    </section>
 
-    <%# ── Sidebar ───────────────────────────────────────────────────────── %>
-    <aside class="layout-editor-sidebar">
+        <%# Sidebar toggle + floating sidebar sit inside canvas-wrap ────── %>
+        <button type="button" class="editor-sidebar-toggle" id="editorSidebarToggle">Panel ▶</button>
+        <aside class="layout-editor-sidebar" id="editorSidebar">
 
       <%# Tab bar ─────────────────────────────────────────────────────── %>
       <div class="editor-sidebar-tabs">
@@ -146,8 +145,10 @@
         </div>
       </div>
 
-    </aside>
-  </div>
+        </aside><%# end .layout-editor-sidebar %>
+      </div><%# end .layout-editor-canvas-wrap %>
+    </section><%# end .layout-editor-scene-card %>
+  </div><%# end .layout-editor-grid %>
 
 </main>
 
