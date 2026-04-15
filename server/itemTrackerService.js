@@ -868,20 +868,50 @@ class ItemTrackerService {
 
   async getLayoutOverrides() {
     const overridePath = path.join(__dirname, "data", "layout-overrides.json");
+
+    // Default bin size dimensions (mm). Seeded on first run; user edits are persisted.
+    const DEFAULT_BIN_SIZES = {
+      F2: { height: 310,  width: 650,  depth: 600  },
+      F4: { height: 310,  width: 325,  depth: 600  },
+      F8: { height: 310,  width: 160,  depth: 300  },
+      CG: { height: 1650, width: 1200, depth: 1000 },
+      CF: { height: 2200, width: 1200, depth: 1000 },
+      CP: { height: 800,  width: 425,  depth: 900  },
+      CU: { height: 350,  width: 433,  depth: 900  },
+      CL: { height: 350,  width: 1200, depth: 900  },
+      CB: { height: 1150, width: 1200, depth: 1000 },
+      CR: { height: 510,  width: 675,  depth: 900  },
+    };
+
+    let parsed = {};
     try {
       const raw = await fs.readFile(overridePath, "utf8");
-      const parsed = JSON.parse(raw);
-      return {
-        zones:             parsed.zones             || {},
-        aisles:            parsed.aisles            || {},
-        bays:              parsed.bays              || {},
-        locations:         parsed.locations         || {},
-        virtual_locations: parsed.virtual_locations || [],
-        bin_sizes:         parsed.bin_sizes         || {}
-      };
+      parsed = JSON.parse(raw);
     } catch (_) {
-      return { zones: {}, aisles: {}, bays: {}, locations: {}, virtual_locations: [], bin_sizes: {} };
+      // File missing or corrupt — will be created below with defaults
     }
+
+    // Merge defaults into bin_sizes so known codes are always present,
+    // but any user-customised entry takes precedence.
+    const bin_sizes = { ...DEFAULT_BIN_SIZES, ...(parsed.bin_sizes || {}) };
+
+    const result = {
+      zones:             parsed.zones             || {},
+      aisles:            parsed.aisles            || {},
+      bays:              parsed.bays              || {},
+      locations:         parsed.locations         || {},
+      virtual_locations: parsed.virtual_locations || [],
+      bin_sizes,
+    };
+
+    // If the file was missing, write it out now so it persists
+    if (!parsed.bin_sizes) {
+      try {
+        await fs.writeFile(overridePath, JSON.stringify(result, null, 2), "utf8");
+      } catch (_) { /* non-fatal */ }
+    }
+
+    return result;
   }
 
   async saveLayoutOverrides(overrides) {

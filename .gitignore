@@ -2,3 +2,5 @@ node_modules/
 .env
 logs/
 npm-debug.log*
+# Runtime data files — edited live by the layout editor, must not be overwritten by git pull
+server/data/layout-overrides.json
