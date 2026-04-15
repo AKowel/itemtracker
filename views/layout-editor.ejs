@@ -116,7 +116,11 @@
 
       <%# ── BIN SIZES TAB ─────────────────────────────────────────────── %>
       <div id="tabBinsizes" class="editor-tab-panel" hidden>
-        <p class="editor-tab-desc">Set the physical dimensions (in scene units) for each bin size code found in the warehouse snapshot. Default cube is 1.05 × 1.05 × 0.8.</p>
+        <p class="editor-tab-desc">Physical dimensions (mm) per bin size code. Codes come live from <code>BLSCOD</code> in the warehouse snapshot — codes shown in <span style="color:#30d880">green</span> have dimensions defined, <span style="color:#f04080">red</span> ones fall back to defaults.</p>
+        <div id="binSizesLiveWrap" class="bin-sizes-live-wrap" hidden>
+          <span class="bin-sizes-live-label">Codes in snapshot:</span>
+          <div id="binSizesLiveChips"></div>
+        </div>
         <div id="binSizesList" class="bin-sizes-list">
           <p class="admin-loading">Loading…</p>
         </div>

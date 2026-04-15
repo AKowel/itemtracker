@@ -2229,6 +2229,50 @@ body.lightbox-open {
   gap: 3px;
 }
 
+.bin-sizes-live-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  margin-bottom: 10px;
+}
+
+.bin-sizes-live-label {
+  font-size: 0.72rem;
+  color: var(--text-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+#binSizesLiveChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.bin-live-chip {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 5px;
+  cursor: default;
+}
+
+.bin-live-defined {
+  background: rgba(48, 216, 128, 0.15);
+  color: #30d880;
+  border: 1px solid rgba(48, 216, 128, 0.35);
+}
+
+.bin-live-missing {
+  background: rgba(240, 64, 128, 0.15);
+  color: #f04080;
+  border: 1px solid rgba(240, 64, 128, 0.35);
+}
+
 .bin-size-unit {
   font-size: 0.68rem;
   color: var(--text-soft);

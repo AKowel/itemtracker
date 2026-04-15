@@ -527,7 +527,9 @@ async function createApp() {
     requireAdminApi,
     asyncHandler(async (req, res) => {
       const locations = await service.getSnapshotLocations();
-      return res.json({ ok: true, locations });
+      // Collect unique bin size codes present in the snapshot for UI cross-referencing
+      const knownBinSizes = [...new Set(locations.map(l => l.bin_size).filter(Boolean))].sort();
+      return res.json({ ok: true, locations, known_bin_sizes: knownBinSizes });
     })
   );
 

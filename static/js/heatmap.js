@@ -453,12 +453,46 @@ function buildScene(rows, layout, metricKey, overrides) {
   const mesh = new THREE.InstancedMesh(geometry, material, Math.max(rows.length, 1));
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
 
-  // Pre-compute max slot per bay so multi-slot aisles (e.g. 8 slots/bay) centre correctly
-  const bayMaxSlot = new Map();
+  // ── Pre-processing pass 1: slot info per bay+level ──────────────────────
+  // Key format: "<prefix><bay>L<levelNum>"  e.g. "WK29L10"
+  // Stores the max slot number and bin dimensions (max h taken for stack safety)
+  const levelSlotInfo = new Map();
   for (const row of rows) {
-    const key = (row.aisle_prefix || "") + (row.bay || "");
-    const s = Number.parseInt(row.slot || "1", 10) || 1;
-    if (s > (bayMaxSlot.get(key) || 0)) bayMaxSlot.set(key, s);
+    const prefix   = row.aisle_prefix || "";
+    const levelNum = Number.parseInt(row.level || "0", 10);
+    const slot     = Number.parseInt(row.slot  || "1", 10) || 1;
+    const lKey     = prefix + (row.bay || "") + "L" + levelNum;
+    const { w, h, d } = getCubeSize(row, binSizes);
+    const ex = levelSlotInfo.get(lKey);
+    if (!ex) {
+      levelSlotInfo.set(lKey, { maxSlot: slot, w, h, d });
+    } else {
+      if (slot > ex.maxSlot) ex.maxSlot = slot;
+      if (h > ex.h) ex.h = h; // tallest bin at this level drives stack height
+    }
+  }
+
+  // ── Pre-processing pass 2: stacked Y base per bay+level ─────────────────
+  // Sort levels numerically and accumulate actual bin heights from the floor up.
+  // 30 mm gap between shelves (shelf board thickness).
+  const SHELF_GAP  = 0.03;
+  const levelBaseY = new Map(); // lKey → Y coordinate of shelf floor
+  const bayLevels  = new Map(); // bayKey → [levelNums]
+  for (const lKey of levelSlotInfo.keys()) {
+    const li     = lKey.lastIndexOf("L");
+    const bayKey = lKey.slice(0, li);
+    const lvlNum = Number.parseInt(lKey.slice(li + 1), 10);
+    if (!bayLevels.has(bayKey)) bayLevels.set(bayKey, []);
+    bayLevels.get(bayKey).push(lvlNum);
+  }
+  for (const [bayKey, levels] of bayLevels) {
+    levels.sort((a, b) => a - b);
+    let cumY = 0;
+    for (const lvlNum of levels) {
+      const lKey = bayKey + "L" + lvlNum;
+      levelBaseY.set(lKey, cumY);
+      cumY += (levelSlotInfo.get(lKey)?.h || 1.05) + SHELF_GAP;
+    }
   }
 
   const dummy = new THREE.Object3D();
@@ -488,17 +522,17 @@ function buildScene(rows, layout, metricKey, overrides) {
     //        │              HALLWAY                         │
     //  right │ [bay2-s01][bay2-s02]  [bay4-s01][bay4-s02] │
     //
-    const BAY_STEP   = 2.4;   // Z-distance between adjacent bay-pair centres (fits 2×w + gap)
+    const BAY_STEP   = 2.6;   // Z-distance between adjacent bay-pair centres (≥ 2×CF 1.2m + 0.2m gap)
     const AISLE_HALF = 1.5;   // X-distance from aisle centre to rack face centre
     const bayPair    = Math.ceil(bayNumber / 2);
     const isEvenBay  = (bayNumber % 2) === 0;
     const sideSign   = isEvenBay ? 1 : -1;           // +1 = right wall, -1 = left wall
     const depthSign  = aisle.reverse_bay_dir ? 1 : -1;
 
-    // Slot offset along Z — centred within the bay.
-    // With 2 slots: slot1 = -0.5w, slot2 = +0.5w (original behaviour preserved).
-    // With N slots: evenly spaced, slot 1 outermost toward entrance (–Z).
-    const totalSlots = bayMaxSlot.get(bayKey) || 2;
+    // Slot offset along Z — centred per bay+level (each level may have different count/width)
+    const lKey       = (row.aisle_prefix || "") + (row.bay || "") + "L" + levelNumber;
+    const levelInfo  = levelSlotInfo.get(lKey);
+    const totalSlots = levelInfo?.maxSlot || 1;
     const slotZOff   = (slotNumber - 1 - (totalSlots - 1) / 2) * w;
 
     const rotY = aisle.rotation_y || 0;
@@ -514,7 +548,9 @@ function buildScene(rows, layout, metricKey, overrides) {
       x = aisle.x + sideSign * AISLE_HALF + extraX;
       z = depthSign * -(bayPair * BAY_STEP) + slotZOff + (aisle.z_origin || 0) + extraZ;
     }
-    const y = Math.max(h * 0.5, Math.round(levelNumber / 10) * 1.18 + h * 0.5) + extraY;
+    // Y: floor of this shelf level + half bin height (bin centre), plus any per-location Y override
+    const baseY = levelBaseY.get(lKey) || 0;
+    const y     = baseY + h * 0.5 + extraY;
 
     dummy.position.set(x, y, z);
     // Cube X = rack depth (d), Y = height (h), Z = bin width along hallway (w)

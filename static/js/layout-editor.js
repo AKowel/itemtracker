@@ -115,7 +115,7 @@ function computeZoneLayouts() {
     const width   = Math.max(visAisles.length - 1, 0) * aisleSpacing + 4;
     // Use real max-bay data when available, otherwise default
     const zoneMaxBay = visAisles.reduce((m, a) => Math.max(m, aisleMaxBay.get(a.prefix) || 20), 20);
-    const depth   = Math.max(30, Math.ceil(zoneMaxBay / 2) * 2.4 + 8);
+    const depth   = Math.max(30, Math.ceil(zoneMaxBay / 2) * 2.6 + 8);
     const centerX = startX + width / 2 - 2;
     const centerZ = zOffset - depth / 2 + 4;
     result.push({ zone, key, active, visAisles, width, depth, centerX, centerZ, zOffset, rotY, reverseDir });
@@ -272,54 +272,93 @@ function buildLocationDots(allLocations) {
 // Uses warehouseLocs (fetched from server) for the full set.
 // Falls back to locations derived from overrides if data not loaded yet.
 function getAllLocations(aisleCoords) {
-  const BAY_STEP   = 2.4;
+  const BAY_STEP   = 2.6;   // Z-distance between adjacent bay-pair centres (≥ 2×CF 1.2m + 0.2m gap)
   const AISLE_HALF = 1.5;
   const result = [];
 
   // Source: full snapshot data if loaded, otherwise derive from overrides only
   const source = warehouseLocs || deriveLocsFromOverrides();
 
-  // Pre-compute max slot per bay so multi-slot aisles centre correctly
-  const bayMaxSlot = new Map();
+  // ── Pass 1: slot info per bay+level (max slots, bin dims) ────────────────
+  const mmToM    = v => Number(v) > 10 ? Number(v) / 1000 : Number(v);
+  const getWHD   = row => {
+    const code = String(row.bin_size || "").trim().toUpperCase();
+    const dims = code ? (overrides.bin_sizes[code] || null) : null;
+    return {
+      w: mmToM(dims?.width  || 1050),
+      h: mmToM(dims?.height || 1050),
+      d: mmToM(dims?.depth  || 800),
+    };
+  };
+
+  const levelSlotInfo = new Map(); // "<prefix><bayPad>L<level>" → { maxSlot, w, h, d }
   for (const row of source) {
-    const prefix = String(row.aisle_prefix || row.location?.slice(0, 2) || "").toUpperCase();
-    const key = prefix + String(Number(row.bay) || 0).padStart(2, "0");
-    const s = Number(row.slot) || 1;
-    if (s > (bayMaxSlot.get(key) || 0)) bayMaxSlot.set(key, s);
+    const prefix   = String(row.aisle_prefix || row.location?.slice(0, 2) || "").toUpperCase();
+    const bay      = Number(row.bay)   || 0;
+    const levelNum = Number(row.level) || 0;
+    const slot     = Number(row.slot)  || 1;
+    const lKey     = prefix + String(bay).padStart(2, "0") + "L" + levelNum;
+    const { w, h, d } = getWHD(row);
+    const ex = levelSlotInfo.get(lKey);
+    if (!ex) {
+      levelSlotInfo.set(lKey, { maxSlot: slot, w, h, d });
+    } else {
+      if (slot > ex.maxSlot) ex.maxSlot = slot;
+      if (h > ex.h) ex.h = h;
+    }
   }
 
+  // ── Pass 2: stacked Y base per bay+level ─────────────────────────────────
+  const SHELF_GAP  = 0.03;
+  const levelBaseY = new Map();
+  const bayLevels  = new Map();
+  for (const lKey of levelSlotInfo.keys()) {
+    const li     = lKey.lastIndexOf("L");
+    const bayKey = lKey.slice(0, li);
+    const lvlNum = Number.parseInt(lKey.slice(li + 1), 10);
+    if (!bayLevels.has(bayKey)) bayLevels.set(bayKey, []);
+    bayLevels.get(bayKey).push(lvlNum);
+  }
+  for (const [bayKey, levels] of bayLevels) {
+    levels.sort((a, b) => a - b);
+    let cumY = 0;
+    for (const lvlNum of levels) {
+      const lKey = bayKey + "L" + lvlNum;
+      levelBaseY.set(lKey, cumY);
+      cumY += (levelSlotInfo.get(lKey)?.h || 1.05) + SHELF_GAP;
+    }
+  }
+
+  // ── Main loop ─────────────────────────────────────────────────────────────
   for (const row of source) {
     const prefix = String(row.aisle_prefix || row.location?.slice(0, 2) || "").toUpperCase();
     const ac = aisleCoords.get(prefix);
     if (!ac) continue;
 
     const bay   = Number(row.bay)   || 0;
-    const level = Number(row.level) || 10;
+    const level = Number(row.level) || 0;
     const slot  = Number(row.slot)  || 1;
 
     const locOvr = overrides.locations[row.location] || {};
     const bayKey = prefix + String(bay).padStart(2, "0");
     const bayOvr = overrides.bays[bayKey] || {};
 
-    // Resolve bin size dimensions (stored in mm → convert to world units)
-    const sizeCode  = String(row.bin_size || "").trim().toUpperCase();
-    const sizeDims  = sizeCode ? (overrides.bin_sizes[sizeCode] || null) : null;
-    const mmToM     = v => Number(v) > 10 ? Number(v) / 1000 : Number(v);
-    const w = mmToM(sizeDims?.width  || 1050); // bin width along Z
-    const h = mmToM(sizeDims?.height || 1050); // bin height
-    const d = mmToM(sizeDims?.depth  || 800);  // rack depth along X
+    const { w, h, d } = getWHD(row);
 
     const bayPair    = Math.ceil(bay / 2);
     const isEvenBay  = (bay % 2) === 0;
     const sideSign   = isEvenBay ? 1 : -1;
     const depthSign  = ac.reverseDir ? 1 : -1;
 
-    // Slot offset along Z — centred within the bay (handles any number of slots)
-    const totalSlots = bayMaxSlot.get(bayKey) || 2;
+    // Slot offset along Z — centred per bay+level
+    const lKey       = bayKey + "L" + level;
+    const levelInfo  = levelSlotInfo.get(lKey);
+    const totalSlots = levelInfo?.maxSlot || 1;
     const slotZOff   = (slot - 1 - (totalSlots - 1) / 2) * w;
 
     const x = ac.x + sideSign * AISLE_HALF + Number(locOvr.x_offset || bayOvr.x_offset || 0);
-    const y = Math.max(h * 0.5, Math.round(level / 10) * 1.18 + h * 0.5) + Number(locOvr.y_offset || 0);
+    const baseY = levelBaseY.get(lKey) || 0;
+    const y = baseY + h * 0.5 + Number(locOvr.y_offset || 0);
     const z = depthSign * -(bayPair * BAY_STEP) + slotZOff + (ac.zoneZOffset || 0) + Number(locOvr.z_offset || bayOvr.z_offset || 0);
 
     result.push({ location: row.location, bayKey, x, y, z, w, h, d, is_virtual: !!(row.is_virtual), zoneKey: ac.zoneKey });
@@ -818,6 +857,27 @@ async function loadWarehouseLocations() {
     if (hintTx) hintTx.textContent = selMode === "zone" ? "Click a zone to select" : "Click a block to select";
     if (hintEl) hintEl.hidden = false;
     if (zoneChip) zoneChip.textContent = `${(layout.zones || []).length} zone${(layout.zones || []).length === 1 ? "" : "s"} · ${warehouseLocs.length.toLocaleString()} locations`;
+
+    // Show live bin size codes from snapshot — green = dimensions defined, red = missing
+    const liveWrap  = document.getElementById("binSizesLiveWrap");
+    const liveChips = document.getElementById("binSizesLiveChips");
+    const knownCodes = Array.isArray(data.known_bin_sizes) ? data.known_bin_sizes : [];
+    if (liveWrap && liveChips && knownCodes.length) {
+      liveChips.innerHTML = knownCodes.map(code => {
+        const defined = !!(overrides.bin_sizes[code]);
+        return `<span class="bin-live-chip ${defined ? "bin-live-defined" : "bin-live-missing"}" title="${defined ? "Dimensions defined" : "No dimensions — using defaults"}">${escapeHtml(code)}</span>`;
+      }).join("");
+      liveWrap.hidden = false;
+      // Auto-add any missing codes so the user sees them in the edit list
+      let added = false;
+      for (const code of knownCodes) {
+        if (!overrides.bin_sizes[code]) {
+          overrides.bin_sizes[code] = { width: 1050, height: 1050, depth: 800 };
+          added = true;
+        }
+      }
+      if (added) renderBinSizes();
+    }
   } catch (err) {
     console.error("layout-editor: failed to load locations", err);
     if (hintTx) hintTx.textContent = "⚠ Could not load locations — check server";
