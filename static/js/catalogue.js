@@ -727,7 +727,7 @@
       const preflightRes = await fetch(preflightUrl);
       if (preflightRes.ok) {
         const preflightData = await preflightRes.json().catch(() => ({}));
-        const rows = Array.isArray(preflightData.results) ? preflightData.results : [];
+        const rows = Array.isArray(preflightData.rows) ? preflightData.rows : [];
         if (rows.length === 1 && rows[0].sku) {
           await closeScannerModal();
           window.location.href = "/sku/" + encodeURIComponent(rows[0].sku);

@@ -2008,3 +2008,269 @@ body.lightbox-open {
   font-size: 0.9rem;
   line-height: 1.55;
 }
+
+/* ── Layout editor: mode toolbar ─────────────────────────────────────────── */
+
+.editor-mode-card {
+  padding: 10px 16px;
+}
+
+.editor-mode-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.editor-mode-label {
+  font-size: 0.82rem;
+  color: var(--text-soft);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.editor-mode-tabs {
+  display: flex;
+  gap: 4px;
+  background: var(--bg-accent);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 3px;
+  flex-shrink: 0;
+}
+
+.editor-mode-tab {
+  padding: 5px 14px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 0.84rem;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.editor-mode-tab:hover {
+  background: rgba(255,255,255,0.06);
+  color: var(--text);
+}
+
+.editor-mode-tab.active {
+  background: var(--brand);
+  color: #fff;
+  font-weight: 600;
+}
+
+.editor-mode-search {
+  display: flex;
+  gap: 6px;
+  flex: 1;
+  min-width: 180px;
+  max-width: 320px;
+}
+
+.editor-mode-search input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Layout editor: sidebar tabs ─────────────────────────────────────────── */
+
+.editor-sidebar-tabs {
+  display: flex;
+  border-bottom: 1.5px solid var(--line);
+  margin-bottom: 0;
+  background: var(--bg-accent);
+  border-radius: 16px 16px 0 0;
+  overflow: hidden;
+}
+
+.editor-sidebar-tab {
+  flex: 1;
+  padding: 11px 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-soft);
+  font-size: 0.83rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2.5px solid transparent;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+  white-space: nowrap;
+}
+
+.editor-sidebar-tab:hover {
+  background: rgba(255,255,255,0.04);
+  color: var(--text);
+}
+
+.editor-sidebar-tab.active {
+  color: var(--brand);
+  border-bottom-color: var(--brand);
+  background: rgba(26, 92, 168, 0.06);
+}
+
+.editor-tab-panel {
+  padding: 14px 0 8px;
+}
+
+.editor-tab-panel[hidden] { display: none; }
+
+.editor-tab-desc {
+  font-size: 0.84rem;
+  color: var(--text-soft);
+  line-height: 1.55;
+  margin: 0 0 14px;
+}
+
+/* ── Layout editor: selection head ───────────────────────────────────────── */
+
+.editor-sel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.editor-sel-head .eyebrow {
+  margin-bottom: 2px;
+}
+
+.editor-sel-head strong {
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
+/* ── Bin sizes list ───────────────────────────────────────────────────────── */
+
+.bin-sizes-list {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.bin-size-row {
+  display: grid;
+  grid-template-columns: 2.4rem 1fr 1fr 1fr auto;
+  gap: 8px;
+  align-items: center;
+  background: var(--bg-accent);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+
+.bin-size-code {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--text);
+  text-align: center;
+}
+
+.bin-size-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.bin-size-field label {
+  font-size: 0.72rem;
+  color: var(--text-soft);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.bin-size-field input {
+  width: 100%;
+  padding: 5px 8px;
+  font-size: 0.85rem;
+}
+
+.bin-size-remove {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text-soft);
+  padding: 5px 8px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: border-color 0.15s, color 0.15s;
+  align-self: center;
+}
+
+.bin-size-remove:hover {
+  border-color: #e05d5d;
+  color: #e05d5d;
+}
+
+.editor-bin-add-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 4px;
+}
+
+.editor-bin-add-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Virtual locations list ───────────────────────────────────────────────── */
+
+.virtual-locations-list {
+  display: grid;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.virtual-loc-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  background: var(--bg-accent);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px 12px;
+}
+
+.virtual-loc-code {
+  font-weight: 700;
+  font-size: 0.88rem;
+  color: var(--text);
+}
+
+.virtual-loc-meta {
+  font-size: 0.78rem;
+  color: var(--text-soft);
+  flex: 1;
+  text-align: right;
+  padding-right: 6px;
+}
+
+.virtual-loc-remove {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--text-soft);
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 0.8rem;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.virtual-loc-remove:hover {
+  border-color: #e05d5d;
+  color: #e05d5d;
+}
+
+.editor-virtual-add {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  background: var(--bg-accent);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  margin-top: 4px;
+}

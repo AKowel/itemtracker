@@ -7,9 +7,9 @@
     <div class="hero-card__copy">
       <p class="eyebrow">Admin · 3D Map</p>
       <h1>Layout Editor</h1>
-      <p>Move and rotate zone blocks in the 3D scene. Changes are saved as overrides and applied to the picking heatmap without touching the layout manifest file.</p>
+      <p>Move zones, bays, and individual locations. Add virtual locations that don't exist in the warehouse snapshot. Configure bin size dimensions.</p>
       <div class="hero-card__chips">
-        <span class="chip" id="editorZoneChip">Loading zones…</span>
+        <span class="chip" id="editorZoneChip">Loading…</span>
         <span class="chip chip--inactive" id="editorSaveChip" hidden>Unsaved changes</span>
       </div>
     </div>
@@ -19,92 +19,126 @@
     </div>
   </section>
 
+  <%# ── Selection mode toolbar ─────────────────────────────────────────── %>
+  <section class="panel-card editor-mode-card">
+    <div class="editor-mode-bar">
+      <span class="editor-mode-label">Select by:</span>
+      <div class="editor-mode-tabs">
+        <button type="button" class="editor-mode-tab active" data-mode="zone">Zone</button>
+        <button type="button" class="editor-mode-tab" data-mode="bay">Bay group</button>
+        <button type="button" class="editor-mode-tab" data-mode="location">Location</button>
+      </div>
+      <div class="editor-mode-search" id="editorModeSearch">
+        <input type="search" id="editorLocationSearch" placeholder="e.g. WF29 or WF291501" autocomplete="off">
+        <button type="button" id="editorLocationSearchBtn">Find</button>
+      </div>
+      <button type="button" class="ghost-button" id="editorResetViewButton">Reset view</button>
+      <span class="chip chip--inactive" id="editorStatusChip">Click to select</span>
+    </div>
+  </section>
+
   <div class="layout-editor-grid">
 
-    <%# ── 3D canvas ─────────────────────────────────────────────────── %>
+    <%# ── 3D canvas ─────────────────────────────────────────────────────── %>
     <section class="panel-card layout-editor-scene-card">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">3D Scene</p>
-          <h2>Zone positions</h2>
-          <p>Click a zone to select it, then use the controls on the right to adjust its position and rotation.</p>
-        </div>
-        <div class="layout-editor-scene-actions">
-          <button type="button" class="ghost-button" id="editorResetViewButton">Reset view</button>
-          <span class="chip chip--inactive" id="editorStatusChip">Loading…</span>
-        </div>
-      </div>
       <div class="layout-editor-canvas-wrap">
         <canvas id="editorCanvas"></canvas>
         <div class="layout-editor-hint" id="editorHint">
-          <strong>Click a zone to select it</strong>
+          <strong id="editorHintText">Click a zone to select</strong>
           <span>Drag to orbit · scroll to zoom</span>
         </div>
       </div>
     </section>
 
-    <%# ── Sidebar ───────────────────────────────────────────────────── %>
-    <aside class="panel-card layout-editor-sidebar">
+    <%# ── Sidebar ───────────────────────────────────────────────────────── %>
+    <aside class="layout-editor-sidebar">
 
-      <%# Zone list ────────────────────────────────────────────────── %>
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">Zones</p>
-          <h2>Select a zone</h2>
+      <%# Tab bar ─────────────────────────────────────────────────────── %>
+      <div class="editor-sidebar-tabs">
+        <button type="button" class="editor-sidebar-tab active" data-tab="selection">Selection</button>
+        <button type="button" class="editor-sidebar-tab" data-tab="binsizes">Bin sizes</button>
+        <button type="button" class="editor-sidebar-tab" data-tab="virtual">Virtual locs</button>
+      </div>
+
+      <%# ── SELECTION TAB ────────────────────────────────────────────── %>
+      <div id="tabSelection" class="editor-tab-panel">
+        <div id="editorNoSelection" class="editor-no-selection">
+          <p>Use the toolbar above to choose a selection mode, then click something in the 3D scene or search by code.</p>
         </div>
-      </div>
-      <div id="editorZoneList" class="editor-zone-list">
-        <p class="admin-loading">Loading…</p>
-      </div>
-
-      <%# Selected zone controls ───────────────────────────────────── %>
-      <div id="editorZoneControls" class="editor-zone-controls" hidden>
-        <div class="panel-head editor-controls-head">
-          <div>
-            <p class="eyebrow">Selected</p>
-            <h3 id="editorSelectedZoneName">Zone</h3>
+        <div id="editorSelectionControls" class="editor-selection-controls" hidden>
+          <div class="editor-sel-head">
+            <div>
+              <p class="eyebrow" id="editorSelectionType">Zone</p>
+              <strong id="editorSelectionLabel">—</strong>
+            </div>
+            <button type="button" class="ghost-button" id="editorDeselectButton">✕</button>
           </div>
-          <button type="button" class="ghost-button" id="editorDeselectButton">Deselect</button>
-        </div>
 
-        <div class="editor-control-group">
-          <label class="field">
-            <span>X offset <em>(left / right)</em></span>
-            <input type="number" id="editorXOffset" step="1" value="0" placeholder="0">
-          </label>
-          <label class="field">
-            <span>Z offset <em>(forward / back)</em></span>
-            <input type="number" id="editorZOffset" step="1" value="0" placeholder="0">
-          </label>
-          <label class="field">
-            <span>Rotation Y</span>
-            <select id="editorRotationY">
-              <option value="0">0° (default)</option>
-              <option value="90">90° clockwise</option>
-              <option value="-90">90° counter-clockwise</option>
-              <option value="180">180° flipped</option>
-            </select>
-          </label>
-          <label class="toggle-pill">
-            <input type="checkbox" id="editorZoneActive" checked>
-            <span>Zone visible in heatmap</span>
-          </label>
-        </div>
-
-        <div class="panel-head editor-controls-head" style="margin-top:20px">
-          <div>
-            <p class="eyebrow">Aisles in this zone</p>
-            <h3>Individual aisles</h3>
+          <div class="editor-control-group" id="editorPositionControls">
+            <label class="field">
+              <span>X offset <em>(left / right)</em></span>
+              <input type="number" id="editorXOffset" step="0.5" value="0">
+            </label>
+            <label class="field">
+              <span>Z offset <em>(forward / back)</em></span>
+              <input type="number" id="editorZOffset" step="0.5" value="0">
+            </label>
+            <label class="field" id="editorYOffsetWrap" hidden>
+              <span>Y offset <em>(up / down)</em></span>
+              <input type="number" id="editorYOffset" step="0.1" value="0">
+            </label>
+            <label class="field" id="editorRotationWrap">
+              <span>Rotation Y</span>
+              <select id="editorRotationY">
+                <option value="0">0° (default)</option>
+                <option value="90">90° clockwise</option>
+                <option value="-90">90° counter-clockwise</option>
+                <option value="180">180° flipped</option>
+              </select>
+            </label>
+            <label class="toggle-pill">
+              <input type="checkbox" id="editorActiveToggle" checked>
+              <span id="editorActiveLabel">Visible in heatmap</span>
+            </label>
           </div>
-        </div>
-        <div id="editorAisleList" class="editor-aisle-list">
-          <p class="admin-empty">Select a zone first.</p>
+
+          <%# Aisle toggles shown only in zone mode ──────────────────── %>
+          <div id="editorAisleSection" hidden>
+            <p class="eyebrow" style="margin:16px 0 6px">Aisles</p>
+            <div id="editorAisleList" class="editor-aisle-list"></div>
+          </div>
         </div>
       </div>
 
-      <%# Empty state ─────────────────────────────────────────────── %>
-      <div id="editorNoSelection" class="editor-no-selection">
-        <p>Click a zone in the 3D scene or select one from the list above to edit its position.</p>
+      <%# ── BIN SIZES TAB ─────────────────────────────────────────────── %>
+      <div id="tabBinsizes" class="editor-tab-panel" hidden>
+        <p class="editor-tab-desc">Set the physical dimensions (in scene units) for each bin size code found in the warehouse snapshot. Default cube is 1.05 × 1.05 × 0.8.</p>
+        <div id="binSizesList" class="bin-sizes-list">
+          <p class="admin-loading">Loading…</p>
+        </div>
+        <div class="editor-bin-add-row">
+          <input type="text" id="binSizeNewCode" placeholder="Code e.g. CF" maxlength="8" style="text-transform:uppercase">
+          <button type="button" id="binSizeAddBtn">Add code</button>
+        </div>
+      </div>
+
+      <%# ── VIRTUAL LOCATIONS TAB ─────────────────────────────────────── %>
+      <div id="tabVirtual" class="editor-tab-panel" hidden>
+        <p class="editor-tab-desc">Add location codes that don't exist in the warehouse snapshot. They'll appear in the heatmap as empty bins at their calculated position.</p>
+        <div id="virtualLocationsList" class="virtual-locations-list">
+          <p class="admin-empty">No virtual locations defined yet.</p>
+        </div>
+        <div class="editor-virtual-add">
+          <label class="field">
+            <span>Location code <em>(e.g. WF291503)</em></span>
+            <input type="text" id="virtualLocCode" placeholder="WF291503" maxlength="12" style="text-transform:uppercase">
+          </label>
+          <label class="field">
+            <span>Bin size code <em>(optional)</em></span>
+            <input type="text" id="virtualLocBinSize" placeholder="CF" maxlength="8" style="text-transform:uppercase">
+          </label>
+          <button type="button" id="virtualLocAddBtn">Add virtual location</button>
+        </div>
       </div>
 
     </aside>

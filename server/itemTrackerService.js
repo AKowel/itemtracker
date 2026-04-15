@@ -870,17 +870,29 @@ class ItemTrackerService {
     const overridePath = path.join(__dirname, "data", "layout-overrides.json");
     try {
       const raw = await fs.readFile(overridePath, "utf8");
-      return JSON.parse(raw);
+      const parsed = JSON.parse(raw);
+      return {
+        zones:             parsed.zones             || {},
+        aisles:            parsed.aisles            || {},
+        bays:              parsed.bays              || {},
+        locations:         parsed.locations         || {},
+        virtual_locations: parsed.virtual_locations || [],
+        bin_sizes:         parsed.bin_sizes         || {}
+      };
     } catch (_) {
-      return { zones: {}, aisles: {} };
+      return { zones: {}, aisles: {}, bays: {}, locations: {}, virtual_locations: [], bin_sizes: {} };
     }
   }
 
   async saveLayoutOverrides(overrides) {
     const overridePath = path.join(__dirname, "data", "layout-overrides.json");
     const safe = {
-      zones:  overrides?.zones  && typeof overrides.zones  === "object" ? overrides.zones  : {},
-      aisles: overrides?.aisles && typeof overrides.aisles === "object" ? overrides.aisles : {}
+      zones:             overrides?.zones             && typeof overrides.zones  === "object" ? overrides.zones  : {},
+      aisles:            overrides?.aisles            && typeof overrides.aisles === "object" ? overrides.aisles : {},
+      bays:              overrides?.bays              && typeof overrides.bays   === "object" ? overrides.bays   : {},
+      locations:         overrides?.locations         && typeof overrides.locations === "object" ? overrides.locations : {},
+      virtual_locations: Array.isArray(overrides?.virtual_locations) ? overrides.virtual_locations : [],
+      bin_sizes:         overrides?.bin_sizes         && typeof overrides.bin_sizes === "object" ? overrides.bin_sizes : {}
     };
     await fs.writeFile(overridePath, JSON.stringify(safe, null, 2), "utf8");
     return safe;
@@ -994,7 +1006,7 @@ class ItemTrackerService {
     const targetClient = String(clientCode || DEFAULT_CLIENT_CODE).trim().toUpperCase();
     const [layoutManifest, layoutOverrides, warehouseState, pickRecords, catalogState, imageState] = await Promise.all([
       this.loadLayoutManifest(),
-      this.getLayoutOverrides().catch(() => ({ zones: {}, aisles: {} })),
+      this.getLayoutOverrides().catch(() => ({ zones: {}, aisles: {}, bays: {}, locations: {}, virtual_locations: [], bin_sizes: {} })),
       this.loadWarehouseSnapshot(),
       this.listPickActivitySnapshotRecords(targetClient, 120).catch(() => []),
       this.loadSnapshot(targetClient).catch(() => ({ snapshot: null, meta: this.snapshotMeta(null, "none") })),
@@ -1154,6 +1166,7 @@ class ItemTrackerService {
       const parts = this.parseHeatmapLocation(locationCode);
       const sku = normalizeSku(row?.BLITEM || row?.["Item SKU"] || row?.sku);
       const catalogItem = catalogItems.get(sku) || null;
+      const binSize = String(row?.BLSCOD || row?.["Bin Size"] || row?.bin_size || "").trim().toUpperCase();
       locationMap.set(locationCode, {
         location: locationCode,
         aisle_prefix: parts.aisle_prefix,
@@ -1166,6 +1179,7 @@ class ItemTrackerService {
         description: catalogItem?.description || catalogItem?.description_short || "",
         qty: safeNumber(row?.BLQTY || row?.qty || 0),
         status: status || "Y",
+        bin_size: binSize,
         image_count: imageMap.get(sku)?.length || 0,
         has_images: imageMap.has(sku),
         pick_count: 0,
@@ -1195,6 +1209,7 @@ class ItemTrackerService {
           description: "",
           qty: 0,
           status: "",
+          bin_size: "",
           image_count: 0,
           has_images: false,
           top_skus: []
@@ -1204,6 +1219,34 @@ class ItemTrackerService {
       entry.picker_count = Number(row?.picker_count || 0);
       entry.top_skus = Array.isArray(row?.top_skus) ? row.top_skus : [];
       locationMap.set(locationCode, entry);
+    }
+
+    // Merge virtual locations (admin-defined, don't exist in warehouse snapshot)
+    for (const vl of layoutOverrides.virtual_locations || []) {
+      const loc = String(vl.location || "").trim().toUpperCase();
+      if (!loc || locationMap.has(loc)) continue;
+      const parts = this.parseHeatmapLocation(loc);
+      locationMap.set(loc, {
+        location: loc,
+        aisle_prefix: parts.aisle_prefix,
+        bay: parts.bay,
+        level: parts.level,
+        slot: parts.slot,
+        zone_key: zoneIndex.get(parts.aisle_prefix) || "",
+        aisle_index: aisleIndex.has(parts.aisle_prefix) ? aisleIndex.get(parts.aisle_prefix) : 9999,
+        sku: "",
+        description: "",
+        qty: 0,
+        status: "Y",
+        bin_size: String(vl.bin_size || "").trim().toUpperCase(),
+        image_count: 0,
+        has_images: false,
+        pick_count: 0,
+        pick_qty: 0,
+        picker_count: 0,
+        top_skus: [],
+        is_virtual: true
+      });
     }
 
     const rows = Array.from(locationMap.values()).sort((a, b) => {
@@ -1217,6 +1260,12 @@ class ItemTrackerService {
         String(a.location || "").localeCompare(String(b.location || ""))
       );
     });
+
+    // Collect all known bin size codes from data
+    const knownBinSizes = new Set();
+    for (const row of rows) {
+      if (row.bin_size) knownBinSizes.add(row.bin_size);
+    }
 
     const hottestByAisle = new Map();
     let occupiedCount = 0;
@@ -1243,6 +1292,8 @@ class ItemTrackerService {
     return {
       layout: layoutManifest,
       overrides: layoutOverrides,
+      bin_sizes: layoutOverrides.bin_sizes || {},
+      known_bin_sizes: Array.from(knownBinSizes).sort(),
       rows,
       meta: {
         client_code: targetClient,

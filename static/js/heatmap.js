@@ -418,15 +418,31 @@ function clearSceneContent() {
   state.sceneRows = [];
 }
 
+function getCubeSize(row, binSizes) {
+  const code = String(row.bin_size || "").trim().toUpperCase();
+  const locOvr = (state.heatmap?.overrides?.locations || {})[row.location] || {};
+  const dims = (code && binSizes?.[code]) ? binSizes[code] : null;
+  return {
+    w: Number(locOvr.width  || dims?.width  || 1.05),
+    h: Number(locOvr.height || dims?.height || 1.05),
+    d: Number(locOvr.depth  || dims?.depth  || 0.8)
+  };
+}
+
 function buildScene(rows, layout, metricKey, overrides) {
   clearSceneContent();
   if (!sceneState.scene) return;
 
-  const coords = buildAisleCoords(layout, rows, overrides);
+  const coords   = buildAisleCoords(layout, rows, overrides);
+  const binSizes = state.heatmap?.bin_sizes || {};
+  const locOvrs  = overrides?.locations || {};
+  const bayOvrs  = overrides?.bays      || {};
   state.aisleCoords = coords;
   const maxMetric = rows.reduce((max, row) => Math.max(max, metricValue(row, metricKey)), 0);
 
-  const geometry = new THREE.BoxGeometry(1.05, 1.05, 0.8);
+  // Each row may have a different cube size — use separate geometries grouped by size key
+  // For performance with InstancedMesh we use a single mesh with average size and scale per-instance via matrix
+  const geometry = new THREE.BoxGeometry(1, 1, 1); // Unit box — scaled per instance via matrix
   const material = new THREE.MeshStandardMaterial({
     roughness: 0.4,
     metalness: 0.12
@@ -440,26 +456,39 @@ function buildScene(rows, layout, metricKey, overrides) {
     const bayNumber   = Number.parseInt(row.bay   || "0", 10) || 0;
     const levelNumber = Number.parseInt(row.level || "0", 10) || 0;
     const slotNumber  = Number.parseInt(row.slot  || "1", 10) || 1;
-    const slotOffset  = ((slotNumber - 1) % 2 === 0 ? -0.52 : 0.52);
+
+    // Per-location overrides (x/y/z offset)
+    const locOvr = locOvrs[row.location] || {};
+    const bayKey = row.aisle_prefix + row.bay;
+    const bayOvr = bayOvrs[bayKey] || {};
+    const extraX = Number(locOvr.x_offset || bayOvr.x_offset || 0);
+    const extraY = Number(locOvr.y_offset || 0);
+    const extraZ = Number(locOvr.z_offset || bayOvr.z_offset || 0);
+
+    const { w, h, d } = getCubeSize(row, binSizes);
+
+    // Slot offset scaled to cube width so bins pack correctly
+    const slotOffset = ((slotNumber - 1) % 2 === 0 ? -w * 0.5 : w * 0.5);
     const rotY = aisle.rotation_y || 0;
     let x, z;
     if (rotY === 90 || rotY === -270) {
-      x = (aisle.z_origin || 0) - (bayNumber * 1.18);
-      z = -(aisle.x + slotOffset);
+      x = (aisle.z_origin || 0) - (bayNumber * 1.18) + extraX;
+      z = -(aisle.x + slotOffset) + extraZ;
     } else if (rotY === -90 || rotY === 270) {
-      x = (aisle.z_origin || 0) + (bayNumber * 1.18);
-      z = aisle.x + slotOffset;
+      x = (aisle.z_origin || 0) + (bayNumber * 1.18) + extraX;
+      z = aisle.x + slotOffset + extraZ;
     } else {
-      x = aisle.x + slotOffset;
-      z = -(bayNumber * 1.18) + (aisle.z_origin || 0);
+      x = aisle.x + slotOffset + extraX;
+      z = -(bayNumber * 1.18) + (aisle.z_origin || 0) + extraZ;
     }
-    const y = Math.max(0.5, Math.round(levelNumber / 10) * 1.18 + 0.6);
+    const y = Math.max(h * 0.5, Math.round(levelNumber / 10) * 1.18 + h * 0.5) + extraY;
 
     dummy.position.set(x, y, z);
+    dummy.scale.set(w, h, d);
     dummy.updateMatrix();
     mesh.setMatrixAt(index, dummy.matrix);
     mesh.setColorAt(index, heatColor(row, metricKey, maxMetric));
-    state.sceneRows[index] = { ...row, _position: { x, y, z } };
+    state.sceneRows[index] = { ...row, _position: { x, y, z }, _size: { w, h, d } };
   });
 
   mesh.count = rows.length;
@@ -847,7 +876,7 @@ async function loadHeatmap() {
   try {
     const query = buildHeatmapQuery();
     const data = await apiFetch(`/api/admin/picking-heatmap${query}`);
-    state.heatmap = data.heatmap || { rows: [], layout: { zones: [] }, meta: {}, stats: {} };
+    state.heatmap = data.heatmap || { rows: [], layout: { zones: [] }, meta: {}, stats: {}, overrides: {}, bin_sizes: {}, known_bin_sizes: [] };
     const meta = state.heatmap.meta || {};
     updateDateOptions(meta.available_pick_dates || [], meta.pick_snapshot_date || meta.latest_pick_snapshot_date || "");
 
