@@ -533,6 +533,24 @@ async function createApp() {
     })
   );
 
+  // ── Export locations as a standalone JSON file for the desktop Warehouse Editor ──
+  app.get(
+    "/api/admin/export-locations-json",
+    requireAdminApi,
+    asyncHandler(async (req, res) => {
+      const locations = await service.getSnapshotLocations();
+      const exportDate = new Date().toISOString().slice(0, 10);
+      const payload = {
+        exported_at: new Date().toISOString(),
+        location_count: locations.length,
+        locations,
+      };
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Content-Disposition", `attachment; filename="warehouse-locations-${exportDate}.json"`);
+      return res.send(JSON.stringify(payload, null, 2));
+    })
+  );
+
   app.post(
     "/api/admin/layout-overrides",
     requireAdminApi,
