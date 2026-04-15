@@ -55,6 +55,7 @@
       admin_force_logout:       "Force-logged out user",
       admin_force_logout_all:   "Force-logged out all",
       admin_reset_password:     "Reset password",
+      edit_layout:              "Edited layout",
       edit_notes:               "Edited notes",
       request_image_deletion:   "Requested deletion",
       approve_deletion:         "Approved deletion",

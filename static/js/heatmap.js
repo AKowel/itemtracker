@@ -29,6 +29,85 @@ const detailCard = doc?.getElementById("heatmapDetailCard") || null;
 const detailHint = doc?.getElementById("heatmapDetailHint") || null;
 const hotAislesWrap = doc?.getElementById("heatmapHotAisles") || null;
 
+// ── Scene settings (localStorage) ────────────────────────────────────────────
+
+const SETTINGS_STORAGE_KEY = "itemtracker.heatmap.settings";
+const SETTINGS_DEFAULTS = { rotateSpeed: 1.0, zoomSpeed: 1.0, panSpeed: 1.0, wasdSpeed: 1.0 };
+let sceneSettings = { ...SETTINGS_DEFAULTS };
+
+function loadSceneSettings() {
+  try {
+    const raw = localStorage.getItem(SETTINGS_STORAGE_KEY);
+    if (raw) sceneSettings = { ...SETTINGS_DEFAULTS, ...JSON.parse(raw) };
+  } catch (_) {}
+}
+
+function saveSceneSettings() {
+  try { localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(sceneSettings)); } catch (_) {}
+}
+
+function applySceneSettings() {
+  if (!sceneState.controls) return;
+  sceneState.controls.rotateSpeed = sceneSettings.rotateSpeed;
+  sceneState.controls.zoomSpeed   = sceneSettings.zoomSpeed;
+  sceneState.controls.panSpeed    = sceneSettings.panSpeed;
+}
+
+const settingsPanel      = doc?.getElementById("heatmapSettingsPanel")   || null;
+const settingsButton     = doc?.getElementById("heatmapSettingsButton")   || null;
+const settingsClose      = doc?.getElementById("heatmapSettingsClose")    || null;
+const settingsReset      = doc?.getElementById("heatmapSettingsReset")    || null;
+const rotateSpeedInput   = doc?.getElementById("rotateSpeedInput")        || null;
+const zoomSpeedInput     = doc?.getElementById("zoomSpeedInput")          || null;
+const panSpeedInput      = doc?.getElementById("panSpeedInput")           || null;
+const wasdSpeedInput     = doc?.getElementById("wasdSpeedInput")          || null;
+const rotateSpeedLabel   = doc?.getElementById("rotateSpeedLabel")        || null;
+const zoomSpeedLabel     = doc?.getElementById("zoomSpeedLabel")          || null;
+const panSpeedLabel      = doc?.getElementById("panSpeedLabel")           || null;
+const wasdSpeedLabel     = doc?.getElementById("wasdSpeedLabel")          || null;
+
+function syncSettingsPanel() {
+  if (rotateSpeedInput) rotateSpeedInput.value = String(sceneSettings.rotateSpeed);
+  if (zoomSpeedInput)   zoomSpeedInput.value   = String(sceneSettings.zoomSpeed);
+  if (panSpeedInput)    panSpeedInput.value     = String(sceneSettings.panSpeed);
+  if (wasdSpeedInput)   wasdSpeedInput.value    = String(sceneSettings.wasdSpeed);
+  if (rotateSpeedLabel) rotateSpeedLabel.textContent = sceneSettings.rotateSpeed.toFixed(1);
+  if (zoomSpeedLabel)   zoomSpeedLabel.textContent   = sceneSettings.zoomSpeed.toFixed(1);
+  if (panSpeedLabel)    panSpeedLabel.textContent     = sceneSettings.panSpeed.toFixed(1);
+  if (wasdSpeedLabel)   wasdSpeedLabel.textContent    = sceneSettings.wasdSpeed.toFixed(1) + "×";
+}
+
+function wireSettingsPanel() {
+  settingsButton?.addEventListener("click", () => {
+    if (settingsPanel) settingsPanel.hidden = !settingsPanel.hidden;
+  });
+  settingsClose?.addEventListener("click", () => {
+    if (settingsPanel) settingsPanel.hidden = true;
+  });
+  settingsReset?.addEventListener("click", () => {
+    sceneSettings = { ...SETTINGS_DEFAULTS };
+    syncSettingsPanel();
+    applySceneSettings();
+    saveSceneSettings();
+  });
+
+  function makeSliderHandler(inputEl, labelEl, key, suffix) {
+    if (!inputEl) return;
+    inputEl.addEventListener("input", () => {
+      const val = parseFloat(inputEl.value) || SETTINGS_DEFAULTS[key];
+      sceneSettings[key] = val;
+      if (labelEl) labelEl.textContent = val.toFixed(1) + (suffix || "");
+      applySceneSettings();
+      saveSceneSettings();
+    });
+  }
+
+  makeSliderHandler(rotateSpeedInput, rotateSpeedLabel, "rotateSpeed", "");
+  makeSliderHandler(zoomSpeedInput,   zoomSpeedLabel,   "zoomSpeed",   "");
+  makeSliderHandler(panSpeedInput,    panSpeedLabel,    "panSpeed",    "");
+  makeSliderHandler(wasdSpeedInput,   wasdSpeedLabel,   "wasdSpeed",   "×");
+}
+
 const state = {
   heatmap: null,
   rows: [],
@@ -90,7 +169,10 @@ function isEditableElement(target) {
   return ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName);
 }
 
-function buildAisleCoords(layout, rows) {
+function buildAisleCoords(layout, rows, overrides) {
+  const zoneOverrides  = overrides?.zones  || {};
+  const aisleOverrides = overrides?.aisles || {};
+
   const aisleStats = new Map();
   for (const row of rows || []) {
     const prefix = String(row.aisle_prefix || "").trim().toUpperCase();
@@ -106,25 +188,43 @@ function buildAisleCoords(layout, rows) {
   const zoneGap = 16;
 
   for (const [zoneIndex, zone] of (layout?.zones || []).entries()) {
-    const aisles = zone?.aisles || [];
-    const zoneStartX = zoneOffsetX;
+    const zoneKey = zone.zone_key || "";
+    const zoneOvr = zoneOverrides[zoneKey] || {};
+
+    // Skip inactive zones
+    if (zoneOvr.active === false) continue;
+
+    const allAisles = zone?.aisles || [];
+    // Filter inactive aisles
+    const aisles = allAisles.filter((a) => (aisleOverrides[a.prefix] || {}).active !== false);
+
+    const xOffset   = Number(zoneOvr.x_offset  || 0);
+    const zOffset   = Number(zoneOvr.z_offset   || 0);
+    const rotY      = Number(zoneOvr.rotation_y || 0);
+    const zoneStartX = zoneOffsetX + xOffset;
     let zoneMaxBay = 0;
+
     aisles.forEach((aisle, aisleIndex) => {
       const prefix = aisle.prefix;
       const maxBay = Math.max(20, aisleStats.get(prefix)?.maxBay || 20);
       zoneMaxBay = Math.max(zoneMaxBay, maxBay);
       coords.set(prefix, {
-        x: zoneOffsetX + aisleIndex * aisleSpacing,
+        x: zoneStartX + aisleIndex * aisleSpacing,
+        z_origin: zOffset,
+        rotation_y: rotY,
         zoneIndex,
-        zoneKey: zone.zone_key || "",
+        zoneKey,
         zoneLabel: zone.zone_label || ""
       });
     });
+
     const zoneWidth = Math.max(aisles.length - 1, 0) * aisleSpacing + 4;
     zone.layout = {
       x: zoneStartX + zoneWidth / 2 - 2,
       width: zoneWidth,
-      depth: Math.max(26, zoneMaxBay * 1.16 + 8)
+      depth: Math.max(26, zoneMaxBay * 1.16 + 8),
+      z_offset: zOffset,
+      rotation_y: rotY
     };
     zoneOffsetX += aisles.length * aisleSpacing + zoneGap;
   }
@@ -236,6 +336,7 @@ function initScene() {
   sceneState.labelGroup = labelGroup;
   sceneState.floorGroup = floorGroup;
 
+  applySceneSettings();
   animate();
 }
 
@@ -283,7 +384,7 @@ function updateKeyboardMovement(deltaSeconds) {
     return;
   }
 
-  movement.normalize().multiplyScalar(Math.max(8, 18 * deltaSeconds));
+  movement.normalize().multiplyScalar(Math.max(8, 18 * deltaSeconds) * sceneSettings.wasdSpeed);
   sceneState.camera.position.add(movement);
   sceneState.controls.target.add(movement);
 }
@@ -317,11 +418,11 @@ function clearSceneContent() {
   state.sceneRows = [];
 }
 
-function buildScene(rows, layout, metricKey) {
+function buildScene(rows, layout, metricKey, overrides) {
   clearSceneContent();
   if (!sceneState.scene) return;
 
-  const coords = buildAisleCoords(layout, rows);
+  const coords = buildAisleCoords(layout, rows, overrides);
   state.aisleCoords = coords;
   const maxMetric = rows.reduce((max, row) => Math.max(max, metricValue(row, metricKey)), 0);
 
@@ -335,14 +436,24 @@ function buildScene(rows, layout, metricKey) {
 
   const dummy = new THREE.Object3D();
   rows.forEach((row, index) => {
-    const aisle = coords.get(row.aisle_prefix) || { x: 0 };
-    const bayNumber = Number.parseInt(row.bay || "0", 10) || 0;
+    const aisle = coords.get(row.aisle_prefix) || { x: 0, z_origin: 0, rotation_y: 0 };
+    const bayNumber   = Number.parseInt(row.bay   || "0", 10) || 0;
     const levelNumber = Number.parseInt(row.level || "0", 10) || 0;
-    const slotNumber = Number.parseInt(row.slot || "1", 10) || 1;
-    const slotOffset = ((slotNumber - 1) % 2 === 0 ? -0.52 : 0.52);
-    const x = aisle.x + slotOffset;
+    const slotNumber  = Number.parseInt(row.slot  || "1", 10) || 1;
+    const slotOffset  = ((slotNumber - 1) % 2 === 0 ? -0.52 : 0.52);
+    const rotY = aisle.rotation_y || 0;
+    let x, z;
+    if (rotY === 90 || rotY === -270) {
+      x = (aisle.z_origin || 0) - (bayNumber * 1.18);
+      z = -(aisle.x + slotOffset);
+    } else if (rotY === -90 || rotY === 270) {
+      x = (aisle.z_origin || 0) + (bayNumber * 1.18);
+      z = aisle.x + slotOffset;
+    } else {
+      x = aisle.x + slotOffset;
+      z = -(bayNumber * 1.18) + (aisle.z_origin || 0);
+    }
     const y = Math.max(0.5, Math.round(levelNumber / 10) * 1.18 + 0.6);
-    const z = -(bayNumber * 1.18);
 
     dummy.position.set(x, y, z);
     dummy.updateMatrix();
@@ -629,7 +740,7 @@ function applyFilters() {
   const rows = getFilteredRows();
   state.rows = rows;
   renderStats(rows);
-  buildScene(rows, state.heatmap.layout, metricSelect?.value || "pick_count");
+  buildScene(rows, state.heatmap.layout, metricSelect?.value || "pick_count", state.heatmap.overrides || {});
 
   if (state.selectedLocation) {
     const selected = rows.find((row) => row.location === state.selectedLocation) || null;
@@ -865,6 +976,9 @@ function wireEvents() {
 }
 
 if (canvas) {
+  loadSceneSettings();
+  syncSettingsPanel();
+  wireSettingsPanel();
   initScene();
   syncModeUi();
   refreshFullscreenState();

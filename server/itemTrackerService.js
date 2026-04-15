@@ -866,6 +866,26 @@ class ItemTrackerService {
     return manifest;
   }
 
+  async getLayoutOverrides() {
+    const overridePath = path.join(__dirname, "data", "layout-overrides.json");
+    try {
+      const raw = await fs.readFile(overridePath, "utf8");
+      return JSON.parse(raw);
+    } catch (_) {
+      return { zones: {}, aisles: {} };
+    }
+  }
+
+  async saveLayoutOverrides(overrides) {
+    const overridePath = path.join(__dirname, "data", "layout-overrides.json");
+    const safe = {
+      zones:  overrides?.zones  && typeof overrides.zones  === "object" ? overrides.zones  : {},
+      aisles: overrides?.aisles && typeof overrides.aisles === "object" ? overrides.aisles : {}
+    };
+    await fs.writeFile(overridePath, JSON.stringify(safe, null, 2), "utf8");
+    return safe;
+  }
+
   parseHeatmapLocation(locationCode = "") {
     const text = String(locationCode || "").trim().toUpperCase();
     const digits = text.slice(2).replace(/\D+/g, "");
@@ -972,8 +992,9 @@ class ItemTrackerService {
 
   async getPickingHeatmap(clientCode = DEFAULT_CLIENT_CODE, options = {}) {
     const targetClient = String(clientCode || DEFAULT_CLIENT_CODE).trim().toUpperCase();
-    const [layoutManifest, warehouseState, pickRecords, catalogState, imageState] = await Promise.all([
+    const [layoutManifest, layoutOverrides, warehouseState, pickRecords, catalogState, imageState] = await Promise.all([
       this.loadLayoutManifest(),
+      this.getLayoutOverrides().catch(() => ({ zones: {}, aisles: {} })),
       this.loadWarehouseSnapshot(),
       this.listPickActivitySnapshotRecords(targetClient, 120).catch(() => []),
       this.loadSnapshot(targetClient).catch(() => ({ snapshot: null, meta: this.snapshotMeta(null, "none") })),
@@ -1221,6 +1242,7 @@ class ItemTrackerService {
 
     return {
       layout: layoutManifest,
+      overrides: layoutOverrides,
       rows,
       meta: {
         client_code: targetClient,

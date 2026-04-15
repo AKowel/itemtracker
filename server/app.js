@@ -495,6 +495,44 @@ async function createApp() {
   // ── Admin page ──────────────────────────────────────────────────────────
 
   app.get(
+    "/layout-editor",
+    requireAdminPage,
+    asyncHandler(async (req, res) => {
+      const [layout, overrides] = await Promise.all([
+        service.loadLayoutManifest().catch(() => ({ zones: [], aisle_order: [] })),
+        service.getLayoutOverrides().catch(() => ({ zones: {}, aisles: {} }))
+      ]);
+      return res.render("layout-editor", {
+        pageTitle: `Layout Editor | ${config.appName}`,
+        layout,
+        overrides
+      });
+    })
+  );
+
+  app.get(
+    "/api/admin/layout-overrides",
+    requireAdminApi,
+    asyncHandler(async (req, res) => {
+      const [overrides, layout] = await Promise.all([
+        service.getLayoutOverrides(),
+        service.loadLayoutManifest().catch(() => ({ zones: [], aisle_order: [] }))
+      ]);
+      return res.json({ ok: true, overrides, layout });
+    })
+  );
+
+  app.post(
+    "/api/admin/layout-overrides",
+    requireAdminApi,
+    asyncHandler(async (req, res) => {
+      const saved = await service.saveLayoutOverrides(req.body);
+      service.logActivity(req.currentUser, "edit_layout", {}, req.ip || "");
+      return res.json({ ok: true, overrides: saved });
+    })
+  );
+
+  app.get(
     "/picking-heatmap",
     requireAdminPage,
     asyncHandler(async (req, res) => {

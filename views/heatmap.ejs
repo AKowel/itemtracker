@@ -81,12 +81,41 @@
           <p>Drag to orbit, scroll to zoom, and click a cube to inspect that location.</p>
         </div>
         <div class="heatmap-scene-actions">
+          <a href="/layout-editor" class="ghost-button">Edit layout</a>
+          <button type="button" class="ghost-button" id="heatmapSettingsButton" title="Scene settings">&#9881; Settings</button>
           <button type="button" class="ghost-button heatmap-fullscreen-button" id="heatmapFullscreenButton">Full screen</button>
           <span class="chip chip--inactive" id="heatmapStatusChip">Loading...</span>
         </div>
       </div>
       <div class="heatmap-scene-wrap">
         <canvas id="heatmapCanvas"></canvas>
+        <div class="heatmap-settings-panel" id="heatmapSettingsPanel" hidden>
+          <div class="heatmap-settings-panel__head">
+            <strong>Scene Settings</strong>
+            <button type="button" class="ghost-button heatmap-settings-close" id="heatmapSettingsClose">&#10005;</button>
+          </div>
+          <label class="heatmap-settings-row">
+            <span>Orbit speed</span>
+            <input type="range" id="rotateSpeedInput" min="0.1" max="4" step="0.1" value="1">
+            <span id="rotateSpeedLabel" class="heatmap-settings-val">1.0</span>
+          </label>
+          <label class="heatmap-settings-row">
+            <span>Zoom speed</span>
+            <input type="range" id="zoomSpeedInput" min="0.1" max="6" step="0.1" value="1">
+            <span id="zoomSpeedLabel" class="heatmap-settings-val">1.0</span>
+          </label>
+          <label class="heatmap-settings-row">
+            <span>Pan speed</span>
+            <input type="range" id="panSpeedInput" min="0.1" max="4" step="0.1" value="1">
+            <span id="panSpeedLabel" class="heatmap-settings-val">1.0</span>
+          </label>
+          <label class="heatmap-settings-row">
+            <span>WASD speed</span>
+            <input type="range" id="wasdSpeedInput" min="0.3" max="6" step="0.1" value="1">
+            <span id="wasdSpeedLabel" class="heatmap-settings-val">1.0&#215;</span>
+          </label>
+          <button type="button" class="ghost-button heatmap-settings-reset" id="heatmapSettingsReset">Reset defaults</button>
+        </div>
         <div class="heatmap-scene-hint" id="heatmapSceneHint">
           <strong>Full screen controls</strong>
           <span><code>W A S D</code> move the camera, mouse drag orbits, scroll zooms, <code>Esc</code> exits.</span>

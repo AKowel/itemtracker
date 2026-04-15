@@ -1,0 +1,128 @@
+<%- include("partials/head", { pageTitle, assetVersion }) %>
+<%- include("partials/header", { appName, currentUser, flash, bootstrapError: "" }) %>
+
+<main class="page-shell layout-editor-page">
+
+  <section class="hero-card">
+    <div class="hero-card__copy">
+      <p class="eyebrow">Admin · 3D Map</p>
+      <h1>Layout Editor</h1>
+      <p>Move and rotate zone blocks in the 3D scene. Changes are saved as overrides and applied to the picking heatmap without touching the layout manifest file.</p>
+      <div class="hero-card__chips">
+        <span class="chip" id="editorZoneChip">Loading zones…</span>
+        <span class="chip chip--inactive" id="editorSaveChip" hidden>Unsaved changes</span>
+      </div>
+    </div>
+    <div class="hero-card__actions">
+      <a href="/picking-heatmap" class="ghost-button">Back to heatmap</a>
+      <button type="button" id="editorSaveButton" disabled>Save layout</button>
+    </div>
+  </section>
+
+  <div class="layout-editor-grid">
+
+    <%# ── 3D canvas ─────────────────────────────────────────────────── %>
+    <section class="panel-card layout-editor-scene-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">3D Scene</p>
+          <h2>Zone positions</h2>
+          <p>Click a zone to select it, then use the controls on the right to adjust its position and rotation.</p>
+        </div>
+        <div class="layout-editor-scene-actions">
+          <button type="button" class="ghost-button" id="editorResetViewButton">Reset view</button>
+          <span class="chip chip--inactive" id="editorStatusChip">Loading…</span>
+        </div>
+      </div>
+      <div class="layout-editor-canvas-wrap">
+        <canvas id="editorCanvas"></canvas>
+        <div class="layout-editor-hint" id="editorHint">
+          <strong>Click a zone to select it</strong>
+          <span>Drag to orbit · scroll to zoom</span>
+        </div>
+      </div>
+    </section>
+
+    <%# ── Sidebar ───────────────────────────────────────────────────── %>
+    <aside class="panel-card layout-editor-sidebar">
+
+      <%# Zone list ────────────────────────────────────────────────── %>
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Zones</p>
+          <h2>Select a zone</h2>
+        </div>
+      </div>
+      <div id="editorZoneList" class="editor-zone-list">
+        <p class="admin-loading">Loading…</p>
+      </div>
+
+      <%# Selected zone controls ───────────────────────────────────── %>
+      <div id="editorZoneControls" class="editor-zone-controls" hidden>
+        <div class="panel-head editor-controls-head">
+          <div>
+            <p class="eyebrow">Selected</p>
+            <h3 id="editorSelectedZoneName">Zone</h3>
+          </div>
+          <button type="button" class="ghost-button" id="editorDeselectButton">Deselect</button>
+        </div>
+
+        <div class="editor-control-group">
+          <label class="field">
+            <span>X offset <em>(left / right)</em></span>
+            <input type="number" id="editorXOffset" step="1" value="0" placeholder="0">
+          </label>
+          <label class="field">
+            <span>Z offset <em>(forward / back)</em></span>
+            <input type="number" id="editorZOffset" step="1" value="0" placeholder="0">
+          </label>
+          <label class="field">
+            <span>Rotation Y</span>
+            <select id="editorRotationY">
+              <option value="0">0° (default)</option>
+              <option value="90">90° clockwise</option>
+              <option value="-90">90° counter-clockwise</option>
+              <option value="180">180° flipped</option>
+            </select>
+          </label>
+          <label class="toggle-pill">
+            <input type="checkbox" id="editorZoneActive" checked>
+            <span>Zone visible in heatmap</span>
+          </label>
+        </div>
+
+        <div class="panel-head editor-controls-head" style="margin-top:20px">
+          <div>
+            <p class="eyebrow">Aisles in this zone</p>
+            <h3>Individual aisles</h3>
+          </div>
+        </div>
+        <div id="editorAisleList" class="editor-aisle-list">
+          <p class="admin-empty">Select a zone first.</p>
+        </div>
+      </div>
+
+      <%# Empty state ─────────────────────────────────────────────── %>
+      <div id="editorNoSelection" class="editor-no-selection">
+        <p>Click a zone in the 3D scene or select one from the list above to edit its position.</p>
+      </div>
+
+    </aside>
+  </div>
+
+</main>
+
+<script>
+  window.LAYOUT_EDITOR_BOOTSTRAP = <%- safeJson({ layout, overrides }) %>;
+</script>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/vendor/three/build/three.module.js",
+    "three/addons/": "/vendor/three/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="/static/js/layout-editor.js?v=<%= assetVersion %>"></script>
+
+<%- include("partials/footer", { assetVersion }) %>
