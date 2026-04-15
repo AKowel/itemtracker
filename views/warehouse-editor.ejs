@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %> | ItemTracker</title>
+  <link rel="stylesheet" href="/static/css/warehouse-editor.css">
+</head>
+<body>
+  <div id="we-app">
+
+    <!-- Top toolbar -->
+    <div id="we-toolbar">
+      <span class="we-brand">Warehouse Editor</span>
+
+      <div class="we-toolbar-group">
+        <button class="we-tool-btn active" data-mode="select" title="Select (S)">&#11036; Select</button>
+        <button class="we-tool-btn" data-mode="box" title="Box select (B)">&#11036; Box</button>
+      </div>
+
+      <div class="we-toolbar-group">
+        <button id="we-undo" title="Undo (Ctrl+Z)" disabled>&#8617; Undo</button>
+        <button id="we-redo" title="Redo (Ctrl+Y)" disabled>&#8618; Redo</button>
+      </div>
+
+      <div class="we-toolbar-group">
+        <button id="we-deselect" disabled>&#10005; Deselect all</button>
+        <span id="we-sel-count" class="we-status-chip">0 selected</span>
+      </div>
+
+      <div class="we-toolbar-spacer"></div>
+
+      <div class="we-toolbar-group">
+        <span id="we-dirty-chip" class="we-dirty-chip" hidden>Unsaved changes</span>
+        <button id="we-save" class="we-save-btn" disabled>Save to server</button>
+        <a href="/layout-editor" class="we-back-link">&#8592; Layout editor</a>
+      </div>
+    </div>
+
+    <!-- Main area -->
+    <div id="we-main">
+
+      <!-- Left sidebar: hierarchy tree -->
+      <div id="we-sidebar">
+        <div class="we-sidebar-head">
+          <input type="search" id="we-search" placeholder="Search location&hellip;" autocomplete="off">
+        </div>
+        <div id="we-tree"></div>
+      </div>
+
+      <!-- Canvas area -->
+      <div id="we-canvas-wrap">
+        <canvas id="we-canvas"></canvas>
+        <!-- Box select overlay -->
+        <div id="we-box-sel" hidden></div>
+        <!-- Loading overlay -->
+        <div id="we-loading">
+          <div class="we-spinner"></div>
+          <span id="we-loading-text">Loading warehouse data&hellip;</span>
+        </div>
+      </div>
+
+      <!-- Right panel: transform -->
+      <div id="we-panel" class="collapsed">
+        <div class="we-panel-head">
+          <span>Transform</span>
+          <button id="we-panel-close">&#10005;</button>
+        </div>
+
+        <div class="we-panel-section">
+          <div class="we-panel-label">Selection</div>
+          <div id="we-panel-sel-info" class="we-sel-info">Nothing selected</div>
+        </div>
+
+        <div class="we-panel-section">
+          <div class="we-panel-label">Apply delta offset</div>
+          <div class="we-xyz-row">
+            <label>&Delta;X <input type="number" id="we-dx" step="0.1" value="0" placeholder="0"></label>
+            <label>&Delta;Y <input type="number" id="we-dy" step="0.1" value="0" placeholder="0"></label>
+            <label>&Delta;Z <input type="number" id="we-dz" step="0.1" value="0" placeholder="0"></label>
+          </div>
+          <div class="we-panel-hint">Arrow keys = &plusmn;0.1 on X/Z. Hold Shift = &plusmn;1.0</div>
+          <button id="we-apply-offset" class="we-apply-btn">Apply offset</button>
+        </div>
+
+        <div class="we-panel-section">
+          <div class="we-panel-label">Set absolute offset</div>
+          <div class="we-xyz-row">
+            <label>X <input type="number" id="we-ax" step="0.1" placeholder="&mdash;"></label>
+            <label>Y <input type="number" id="we-ay" step="0.1" placeholder="&mdash;"></label>
+            <label>Z <input type="number" id="we-az" step="0.1" placeholder="&mdash;"></label>
+          </div>
+          <button id="we-apply-abs" class="we-apply-btn we-apply-abs">Set absolute</button>
+        </div>
+
+        <div class="we-panel-section">
+          <div class="we-panel-label">Override level</div>
+          <div id="we-ovr-level" class="we-ovr-level-info"></div>
+        </div>
+
+        <div class="we-panel-section">
+          <button id="we-reset-sel" class="we-reset-btn">Reset offsets for selection</button>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Status bar -->
+    <div id="we-statusbar">
+      <span id="we-status-locs"></span>
+      <span id="we-status-cam"></span>
+      <span id="we-status-hint">Click to select &middot; Shift+click to add &middot; Drag to box-select</span>
+    </div>
+
+  </div>
+
+  <!-- Bootstrap data -->
+  <script>
+    window.WE_BOOT = {
+      apiBase: '/api/admin',
+      user: '<%- JSON.stringify(user?.name || "") %>'
+    };
+  </script>
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "/vendor/three/build/three.module.js",
+      "three/addons/": "/vendor/three/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="/static/js/warehouse-editor.js"></script>
+</body>
+</html>

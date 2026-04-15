@@ -544,6 +544,17 @@ async function createApp() {
   );
 
   app.get(
+    "/admin/warehouse-editor",
+    requireAdminPage,
+    asyncHandler(async (req, res) => {
+      return res.render("warehouse-editor", {
+        title: "Warehouse Editor",
+        user: req.currentUser
+      });
+    })
+  );
+
+  app.get(
     "/picking-heatmap",
     requireAdminPage,
     asyncHandler(async (req, res) => {
