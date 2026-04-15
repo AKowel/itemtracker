@@ -423,10 +423,12 @@ function getCubeSize(row, binSizes) {
   const code = String(row.bin_size || "").trim().toUpperCase();
   const locOvr = (state.heatmap?.overrides?.locations || {})[row.location] || {};
   const dims = (code && binSizes?.[code]) ? binSizes[code] : null;
+  // bin_sizes values are stored in mm — divide by 1000 for Three.js world units
+  const mmToM = v => Number(v) > 10 ? Number(v) / 1000 : Number(v); // handle legacy metre values gracefully
   return {
-    w: Number(locOvr.width  || dims?.width  || 1.05),
-    h: Number(locOvr.height || dims?.height || 1.05),
-    d: Number(locOvr.depth  || dims?.depth  || 0.8)
+    w: mmToM(locOvr.width  || dims?.width  || 1050),
+    h: mmToM(locOvr.height || dims?.height || 1050),
+    d: mmToM(locOvr.depth  || dims?.depth  || 800)
   };
 }
 
@@ -450,6 +452,14 @@ function buildScene(rows, layout, metricKey, overrides) {
   });
   const mesh = new THREE.InstancedMesh(geometry, material, Math.max(rows.length, 1));
   mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+  // Pre-compute max slot per bay so multi-slot aisles (e.g. 8 slots/bay) centre correctly
+  const bayMaxSlot = new Map();
+  for (const row of rows) {
+    const key = (row.aisle_prefix || "") + (row.bay || "");
+    const s = Number.parseInt(row.slot || "1", 10) || 1;
+    if (s > (bayMaxSlot.get(key) || 0)) bayMaxSlot.set(key, s);
+  }
 
   const dummy = new THREE.Object3D();
   rows.forEach((row, index) => {
@@ -485,8 +495,11 @@ function buildScene(rows, layout, metricKey, overrides) {
     const sideSign   = isEvenBay ? 1 : -1;           // +1 = right wall, -1 = left wall
     const depthSign  = aisle.reverse_bay_dir ? 1 : -1;
 
-    // Slot offset along Z: slot 01 toward entrance (–Z), slot 02 toward back (+Z)
-    const slotZOff = slotNumber <= 1 ? -w * 0.5 : w * 0.5;
+    // Slot offset along Z — centred within the bay.
+    // With 2 slots: slot1 = -0.5w, slot2 = +0.5w (original behaviour preserved).
+    // With N slots: evenly spaced, slot 1 outermost toward entrance (–Z).
+    const totalSlots = bayMaxSlot.get(bayKey) || 2;
+    const slotZOff   = (slotNumber - 1 - (totalSlots - 1) / 2) * w;
 
     const rotY = aisle.rotation_y || 0;
     let x, z;

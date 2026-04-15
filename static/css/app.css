@@ -2229,6 +2229,14 @@ body.lightbox-open {
   gap: 3px;
 }
 
+.bin-size-unit {
+  font-size: 0.68rem;
+  color: var(--text-soft);
+  letter-spacing: 0.04em;
+  text-align: right;
+  margin-top: 1px;
+}
+
 .bin-size-field label {
   font-size: 0.72rem;
   color: var(--text-soft);

@@ -215,35 +215,36 @@ function buildZoneBlocks(zoneLayouts, zoneBounds, wireframeOnly = false) {
   });
 }
 
-// In bay/location mode: render each location as a small cube via InstancedMesh for performance
+// In bay/location mode: render each location as a scaled cube via InstancedMesh for performance
 function buildLocationDots(allLocations) {
   if (!allLocations || !allLocations.length) return;
 
-  const geo  = new THREE.BoxGeometry(0.88, 0.88, 0.68);
+  // Unit box — each instance is scaled to actual bin dimensions via matrix
+  const geo   = new THREE.BoxGeometry(1, 1, 1);
   const dummy = new THREE.Object3D();
 
   // Bucket locations by colour category
   const buckets = {
-    selected: [],  // selected location
-    bay:      [],  // same bay as selected
-    virtual:  [],  // virtual
-    default:  [],  // everything else
+    selected: [],
+    bay:      [],
+    virtual:  [],
+    default:  [],
   };
   const selBayPrefix = selection?.type === "bay"      ? selection.key : null;
   const selLocKey    = selection?.type === "location"  ? selection.key : null;
 
   for (const loc of allLocations) {
-    if      (selLocKey && loc.location === selLocKey)              buckets.selected.push(loc);
-    else if (selBayPrefix && loc.bayKey === selBayPrefix)          buckets.bay.push(loc);
-    else if (loc.is_virtual)                                        buckets.virtual.push(loc);
-    else                                                            buckets.default.push(loc);
+    if      (selLocKey && loc.location === selLocKey)     buckets.selected.push(loc);
+    else if (selBayPrefix && loc.bayKey === selBayPrefix) buckets.bay.push(loc);
+    else if (loc.is_virtual)                               buckets.virtual.push(loc);
+    else                                                   buckets.default.push(loc);
   }
 
   const configs = [
-    { list: buckets.default,  color: "#2a4a6a", opacity: 1,   transparent: false },
-    { list: buckets.bay,      color: BAY_COLOR,  opacity: 1,   transparent: false },
-    { list: buckets.virtual,  color: VIRTUAL_COLOR, opacity: 1, transparent: false },
-    { list: buckets.selected, color: SEL_COLOR,  opacity: 1,   transparent: false },
+    { list: buckets.default,  color: "#2a4a6a" },
+    { list: buckets.bay,      color: BAY_COLOR  },
+    { list: buckets.virtual,  color: VIRTUAL_COLOR },
+    { list: buckets.selected, color: SEL_COLOR  },
   ];
 
   for (const { list, color } of configs) {
@@ -254,16 +255,16 @@ function buildLocationDots(allLocations) {
 
     list.forEach((loc, i) => {
       dummy.position.set(loc.x, loc.y, loc.z);
-      dummy.scale.set(1, 1, 1);
+      // Scale by actual bin dimensions: X=rack depth, Y=height, Z=bin width along hallway
+      dummy.scale.set(loc.d ?? 0.8, loc.h ?? 1.05, loc.w ?? 1.05);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
-      // Store userData on each instance via a parallel Map
       sc.locMeshes.set(loc.location, { mesh, index: i, userData: { type: "loc", key: loc.location, bayKey: loc.bayKey } });
     });
 
     mesh.userData = { instancedLocs: list };
     sc.scene.add(mesh);
-    sc.zoneMeshes.set("__locs__" + color, mesh); // register for raycasting via zoneMeshes reuse
+    sc.zoneMeshes.set("__locs__" + color, mesh);
   }
 }
 
@@ -278,6 +279,15 @@ function getAllLocations(aisleCoords) {
   // Source: full snapshot data if loaded, otherwise derive from overrides only
   const source = warehouseLocs || deriveLocsFromOverrides();
 
+  // Pre-compute max slot per bay so multi-slot aisles centre correctly
+  const bayMaxSlot = new Map();
+  for (const row of source) {
+    const prefix = String(row.aisle_prefix || row.location?.slice(0, 2) || "").toUpperCase();
+    const key = prefix + String(Number(row.bay) || 0).padStart(2, "0");
+    const s = Number(row.slot) || 1;
+    if (s > (bayMaxSlot.get(key) || 0)) bayMaxSlot.set(key, s);
+  }
+
   for (const row of source) {
     const prefix = String(row.aisle_prefix || row.location?.slice(0, 2) || "").toUpperCase();
     const ac = aisleCoords.get(prefix);
@@ -291,18 +301,28 @@ function getAllLocations(aisleCoords) {
     const bayKey = prefix + String(bay).padStart(2, "0");
     const bayOvr = overrides.bays[bayKey] || {};
 
-    const bayPair   = Math.ceil(bay / 2);
-    const isEvenBay = (bay % 2) === 0;
-    const sideSign  = isEvenBay ? 1 : -1;
-    const depthSign = ac.reverseDir ? 1 : -1;
-    // Slot 01 toward entrance (–Z), slot 02 toward back (+Z)
-    const slotZOff  = slot <= 1 ? -0.525 : 0.525;
+    // Resolve bin size dimensions (stored in mm → convert to world units)
+    const sizeCode  = String(row.bin_size || "").trim().toUpperCase();
+    const sizeDims  = sizeCode ? (overrides.bin_sizes[sizeCode] || null) : null;
+    const mmToM     = v => Number(v) > 10 ? Number(v) / 1000 : Number(v);
+    const w = mmToM(sizeDims?.width  || 1050); // bin width along Z
+    const h = mmToM(sizeDims?.height || 1050); // bin height
+    const d = mmToM(sizeDims?.depth  || 800);  // rack depth along X
+
+    const bayPair    = Math.ceil(bay / 2);
+    const isEvenBay  = (bay % 2) === 0;
+    const sideSign   = isEvenBay ? 1 : -1;
+    const depthSign  = ac.reverseDir ? 1 : -1;
+
+    // Slot offset along Z — centred within the bay (handles any number of slots)
+    const totalSlots = bayMaxSlot.get(bayKey) || 2;
+    const slotZOff   = (slot - 1 - (totalSlots - 1) / 2) * w;
 
     const x = ac.x + sideSign * AISLE_HALF + Number(locOvr.x_offset || bayOvr.x_offset || 0);
-    const y = Math.max(0.45, Math.round(level / 10) * 1.18 + 0.6) + Number(locOvr.y_offset || 0);
+    const y = Math.max(h * 0.5, Math.round(level / 10) * 1.18 + h * 0.5) + Number(locOvr.y_offset || 0);
     const z = depthSign * -(bayPair * BAY_STEP) + slotZOff + (ac.zoneZOffset || 0) + Number(locOvr.z_offset || bayOvr.z_offset || 0);
 
-    result.push({ location: row.location, bayKey, x, y, z, is_virtual: !!(row.is_virtual), zoneKey: ac.zoneKey });
+    result.push({ location: row.location, bayKey, x, y, z, w, h, d, is_virtual: !!(row.is_virtual), zoneKey: ac.zoneKey });
   }
 
   return result;
@@ -561,15 +581,18 @@ function renderBinSizes() {
       <strong class="bin-size-code">${escapeHtml(code)}</strong>
       <label class="bin-size-field">
         <span>W</span>
-        <input type="number" class="bin-sz" data-dim="width"  min="0.1" step="0.05" value="${Number(dims.width  || 1.05).toFixed(2)}">
+        <input type="number" class="bin-sz" data-dim="width"  min="1" step="1" value="${Math.round(Number(dims.width  || 1050))}">
+        <span class="bin-size-unit">mm</span>
       </label>
       <label class="bin-size-field">
         <span>H</span>
-        <input type="number" class="bin-sz" data-dim="height" min="0.1" step="0.05" value="${Number(dims.height || 1.05).toFixed(2)}">
+        <input type="number" class="bin-sz" data-dim="height" min="1" step="1" value="${Math.round(Number(dims.height || 1050))}">
+        <span class="bin-size-unit">mm</span>
       </label>
       <label class="bin-size-field">
         <span>D</span>
-        <input type="number" class="bin-sz" data-dim="depth"  min="0.1" step="0.05" value="${Number(dims.depth  || 0.8).toFixed(2)}">
+        <input type="number" class="bin-sz" data-dim="depth"  min="1" step="1" value="${Math.round(Number(dims.depth  || 800))}">
+        <span class="bin-size-unit">mm</span>
       </label>
       <button type="button" class="bin-size-remove ghost-button" data-code="${escapeHtml(code)}">✕</button>
     </div>`
@@ -582,7 +605,7 @@ function renderBinSizes() {
       const dim  = inp.dataset.dim;
       if (!code || !dim) return;
       if (!overrides.bin_sizes[code]) overrides.bin_sizes[code] = {};
-      overrides.bin_sizes[code][dim] = parseFloat(inp.value) || 0;
+      overrides.bin_sizes[code][dim] = Math.round(parseFloat(inp.value) || 0); // stored in mm
       markDirty();
     });
   });
@@ -705,7 +728,7 @@ function wireControls() {
     const code = String(binSizeNewCode?.value || "").trim().toUpperCase();
     if (!code) return;
     if (!overrides.bin_sizes[code]) {
-      overrides.bin_sizes[code] = { width: 1.05, height: 1.05, depth: 0.8 };
+      overrides.bin_sizes[code] = { width: 1050, height: 1050, depth: 800 }; // stored in mm
       markDirty(); renderBinSizes();
     }
     if (binSizeNewCode) binSizeNewCode.value = "";

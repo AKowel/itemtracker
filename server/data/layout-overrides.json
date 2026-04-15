@@ -1,0 +1,19 @@
+{
+  "zones": {},
+  "aisles": {},
+  "bays": {},
+  "locations": {},
+  "virtual_locations": [],
+  "bin_sizes": {
+    "F2": { "height": 310,  "width": 650,  "depth": 600  },
+    "F4": { "height": 310,  "width": 325,  "depth": 600  },
+    "F8": { "height": 310,  "width": 160,  "depth": 300  },
+    "CG": { "height": 1650, "width": 1200, "depth": 1000 },
+    "CF": { "height": 2200, "width": 1200, "depth": 1000 },
+    "CP": { "height": 800,  "width": 425,  "depth": 900  },
+    "CU": { "height": 350,  "width": 433,  "depth": 900  },
+    "CL": { "height": 350,  "width": 1200, "depth": 900  },
+    "CB": { "height": 1150, "width": 1200, "depth": 1000 },
+    "CR": { "height": 510,  "width": 675,  "depth": 900  }
+  }
+}
