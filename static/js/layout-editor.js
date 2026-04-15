@@ -118,7 +118,7 @@ function computeZoneLayouts() {
     const depth   = Math.max(30, Math.ceil(zoneMaxBay / 2) * 2.4 + 8);
     const centerX = startX + width / 2 - 2;
     const centerZ = zOffset - depth / 2 + 4;
-    result.push({ zone, key, active, visAisles, width, depth, centerX, centerZ, rotY, reverseDir });
+    result.push({ zone, key, active, visAisles, width, depth, centerX, centerZ, zOffset, rotY, reverseDir });
     zoneOffsetX += visAisles.length * aisleSpacing + zoneGap;
   }
   return result;
@@ -131,7 +131,7 @@ function buildAisleCoords(zoneLayouts) {
   for (const z of zoneLayouts) {
     let baseX = z.centerX - (z.visAisles.length - 1) * aisleSpacing / 2;
     z.visAisles.forEach((aisle, i) => {
-      coords.set(aisle.prefix, { x: baseX + i * aisleSpacing, zoneDepth: z.depth, zoneZ: z.centerZ, rotY: z.rotY, reverseDir: z.reverseDir });
+      coords.set(aisle.prefix, { x: baseX + i * aisleSpacing, zoneDepth: z.depth, zoneZ: z.centerZ, zoneZOffset: z.zOffset, rotY: z.rotY, reverseDir: z.reverseDir, zoneKey: z.key });
     });
   }
   return coords;
@@ -149,22 +149,53 @@ function buildEditorScene() {
 
   if (zoneChip) zoneChip.textContent = zoneLayouts.length + " zone" + (zoneLayouts.length === 1 ? "" : "s");
 
-  // Always render zone slabs (solid in zone mode, wireframe overlay otherwise)
-  buildZoneBlocks(zoneLayouts, selMode !== "zone");
+  // Compute block positions first so zone slabs can wrap actual blocks
+  const allLocations = warehouseLocs ? getAllLocations(aisleCoords) : null;
+  const zoneBounds   = computeZoneBounds(zoneLayouts, allLocations);
+
+  // Always render zone slabs (solid in zone mode, transparent overlay otherwise)
+  buildZoneBlocks(zoneLayouts, zoneBounds, selMode !== "zone");
   // Always render location blocks when data is loaded
-  if (warehouseLocs) buildLocationDots(aisleCoords);
+  if (allLocations) buildLocationDots(allLocations);
 }
 
-function buildZoneBlocks(zoneLayouts, wireframeOnly = false) {
+// Build per-zone bounding boxes from actual block positions
+function computeZoneBounds(zoneLayouts, allLocations) {
+  const bounds = new Map();
+  for (const z of zoneLayouts) {
+    bounds.set(z.key, { minX: Infinity, maxX: -Infinity, minZ: Infinity, maxZ: -Infinity });
+  }
+  if (!allLocations) return bounds;
+  for (const loc of allLocations) {
+    if (!loc.zoneKey) continue;
+    const b = bounds.get(loc.zoneKey);
+    if (!b) continue;
+    b.minX = Math.min(b.minX, loc.x);
+    b.maxX = Math.max(b.maxX, loc.x);
+    b.minZ = Math.min(b.minZ, loc.z);
+    b.maxZ = Math.max(b.maxZ, loc.z);
+  }
+  return bounds;
+}
+
+function buildZoneBlocks(zoneLayouts, zoneBounds, wireframeOnly = false) {
   zoneLayouts.forEach((z, ci) => {
     const isSelected = selection?.type === "zone" && selection?.key === z.key;
     const color   = isSelected ? SEL_COLOR : ZONE_COLORS[ci % ZONE_COLORS.length];
     const opacity = wireframeOnly ? 0.18 : (z.active ? 0.65 : 0.22);
 
-    const geo = new THREE.BoxGeometry(z.width, 1.2, z.depth);
+    // Use actual block bounding box when available, fall back to computed layout estimate
+    const b = zoneBounds?.get(z.key);
+    const PAD = 2.5;
+    const slabW  = (b && b.minX !== Infinity) ? (b.maxX - b.minX) + PAD * 2 : z.width;
+    const slabD  = (b && b.minZ !== Infinity) ? (b.maxZ - b.minZ) + PAD * 2 : z.depth;
+    const slabCX = (b && b.minX !== Infinity) ? (b.minX + b.maxX) / 2        : z.centerX;
+    const slabCZ = (b && b.minZ !== Infinity) ? (b.minZ + b.maxZ) / 2        : z.centerZ;
+
+    const geo = new THREE.BoxGeometry(slabW, 1.2, slabD);
     const mat = new THREE.MeshStandardMaterial({ color, transparent: true, opacity, roughness: 0.6, metalness: 0.08 });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(z.centerX, 0, z.centerZ);
+    mesh.position.set(slabCX, 0, slabCZ);
     mesh.rotation.y = (z.rotY * Math.PI) / 180;
     mesh.userData = { type: "zone", key: z.key };
 
@@ -185,9 +216,8 @@ function buildZoneBlocks(zoneLayouts, wireframeOnly = false) {
 }
 
 // In bay/location mode: render each location as a small cube via InstancedMesh for performance
-function buildLocationDots(aisleCoords) {
-  const allLocations = getAllLocations(aisleCoords);
-  if (!allLocations.length) return;
+function buildLocationDots(allLocations) {
+  if (!allLocations || !allLocations.length) return;
 
   const geo  = new THREE.BoxGeometry(0.88, 0.88, 0.68);
   const dummy = new THREE.Object3D();
@@ -270,9 +300,9 @@ function getAllLocations(aisleCoords) {
 
     const x = ac.x + sideSign * AISLE_HALF + Number(locOvr.x_offset || bayOvr.x_offset || 0);
     const y = Math.max(0.45, Math.round(level / 10) * 1.18 + 0.6) + Number(locOvr.y_offset || 0);
-    const z = depthSign * -(bayPair * BAY_STEP) + slotZOff + Number(locOvr.z_offset || bayOvr.z_offset || 0);
+    const z = depthSign * -(bayPair * BAY_STEP) + slotZOff + (ac.zoneZOffset || 0) + Number(locOvr.z_offset || bayOvr.z_offset || 0);
 
-    result.push({ location: row.location, bayKey, x, y, z, is_virtual: !!(row.is_virtual) });
+    result.push({ location: row.location, bayKey, x, y, z, is_virtual: !!(row.is_virtual), zoneKey: ac.zoneKey });
   }
 
   return result;
