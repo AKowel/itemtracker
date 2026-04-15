@@ -240,7 +240,8 @@ function buildLocationDots(aisleCoords) {
 // Uses warehouseLocs (fetched from server) for the full set.
 // Falls back to locations derived from overrides if data not loaded yet.
 function getAllLocations(aisleCoords) {
-  const AISLE_HALF = 1.3;
+  const BAY_STEP   = 2.4;
+  const AISLE_HALF = 1.5;
   const result = [];
 
   // Source: full snapshot data if loaded, otherwise derive from overrides only
@@ -263,11 +264,12 @@ function getAllLocations(aisleCoords) {
     const isEvenBay = (bay % 2) === 0;
     const sideSign  = isEvenBay ? 1 : -1;
     const depthSign = ac.reverseDir ? 1 : -1;
-    const slotOffset = (slot % 2 === 1 ? -0.52 : 0.52);
+    // Slot 01 toward entrance (–Z), slot 02 toward back (+Z)
+    const slotZOff  = slot <= 1 ? -0.525 : 0.525;
 
-    const x = ac.x + sideSign * AISLE_HALF + slotOffset + Number(locOvr.x_offset || bayOvr.x_offset || 0);
+    const x = ac.x + sideSign * AISLE_HALF + Number(locOvr.x_offset || bayOvr.x_offset || 0);
     const y = Math.max(0.45, Math.round(level / 10) * 1.18 + 0.6) + Number(locOvr.y_offset || 0);
-    const z = depthSign * -(bayPair * 1.18) + Number(locOvr.z_offset || bayOvr.z_offset || 0);
+    const z = depthSign * -(bayPair * BAY_STEP) + slotZOff + Number(locOvr.z_offset || bayOvr.z_offset || 0);
 
     result.push({ location: row.location, bayKey, x, y, z, is_virtual: !!(row.is_virtual) });
   }

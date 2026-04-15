@@ -223,7 +223,7 @@ function buildAisleCoords(layout, rows, overrides) {
     zone.layout = {
       x: zoneStartX + zoneWidth / 2 - 2,
       width: zoneWidth,
-      depth: Math.max(26, Math.ceil(zoneMaxBay / 2) * 1.18 + 8),
+      depth: Math.max(26, Math.ceil(zoneMaxBay / 2) * 2.4 + 8),
       z_offset: zOffset,
       rotation_y: rotY
     };
@@ -468,32 +468,44 @@ function buildScene(rows, layout, metricKey, overrides) {
 
     const { w, h, d } = getCubeSize(row, binSizes);
 
-    // Odd/even bay pairing: bays 1&2 share depth position 1, bays 3&4 share position 2, etc.
-    // Odd bays sit on one face of the aisle, even bays on the opposite face.
-    const AISLE_HALF  = 1.3;  // X separation between the two faces of an aisle
-    const bayPair     = Math.ceil(bayNumber / 2);
-    const isEvenBay   = (bayNumber % 2) === 0;
-    const sideSign    = isEvenBay ? 1 : -1;
-    const depthSign   = aisle.reverse_bay_dir ? 1 : -1;
+    // ── Hallway model ───────────────────────────────────────────────────────
+    // The aisle is a corridor running along Z. Odd bays are on the LEFT wall
+    // (–X), even bays on the RIGHT wall (+X) — both at the same Z depth.
+    // Slots 01/02 within a bay are side-by-side ALONG Z (not across the aisle).
+    //
+    //  entrance ──────────────────────────────────── back
+    //  left  │ [bay1-s01][bay1-s02]  [bay3-s01][bay3-s02] │
+    //        │              HALLWAY                         │
+    //  right │ [bay2-s01][bay2-s02]  [bay4-s01][bay4-s02] │
+    //
+    const BAY_STEP   = 2.4;   // Z-distance between adjacent bay-pair centres (fits 2×w + gap)
+    const AISLE_HALF = 1.5;   // X-distance from aisle centre to rack face centre
+    const bayPair    = Math.ceil(bayNumber / 2);
+    const isEvenBay  = (bayNumber % 2) === 0;
+    const sideSign   = isEvenBay ? 1 : -1;           // +1 = right wall, -1 = left wall
+    const depthSign  = aisle.reverse_bay_dir ? 1 : -1;
 
-    // Slot offset scaled to cube width so bins pack correctly side-by-side
-    const slotOffset = ((slotNumber - 1) % 2 === 0 ? -w * 0.5 : w * 0.5);
+    // Slot offset along Z: slot 01 toward entrance (–Z), slot 02 toward back (+Z)
+    const slotZOff = slotNumber <= 1 ? -w * 0.5 : w * 0.5;
+
     const rotY = aisle.rotation_y || 0;
     let x, z;
     if (rotY === 90 || rotY === -270) {
-      x = (aisle.z_origin || 0) + depthSign * (bayPair * 1.18) + extraX;
-      z = -(aisle.x + sideSign * AISLE_HALF + slotOffset) + extraZ;
+      // Rotated 90°: depth runs along X instead of Z
+      x = (aisle.z_origin || 0) + depthSign * (bayPair * BAY_STEP) + slotZOff + extraX;
+      z = -(aisle.x + sideSign * AISLE_HALF) + extraZ;
     } else if (rotY === -90 || rotY === 270) {
-      x = (aisle.z_origin || 0) - depthSign * (bayPair * 1.18) + extraX;
-      z = aisle.x + sideSign * AISLE_HALF + slotOffset + extraZ;
+      x = (aisle.z_origin || 0) - depthSign * (bayPair * BAY_STEP) - slotZOff + extraX;
+      z = aisle.x + sideSign * AISLE_HALF + extraZ;
     } else {
-      x = aisle.x + sideSign * AISLE_HALF + slotOffset + extraX;
-      z = depthSign * -(bayPair * 1.18) + (aisle.z_origin || 0) + extraZ;
+      x = aisle.x + sideSign * AISLE_HALF + extraX;
+      z = depthSign * -(bayPair * BAY_STEP) + slotZOff + (aisle.z_origin || 0) + extraZ;
     }
     const y = Math.max(h * 0.5, Math.round(levelNumber / 10) * 1.18 + h * 0.5) + extraY;
 
     dummy.position.set(x, y, z);
-    dummy.scale.set(w, h, d);
+    // Cube X = rack depth (d), Y = height (h), Z = bin width along hallway (w)
+    dummy.scale.set(d, h, w);
     dummy.updateMatrix();
     mesh.setMatrixAt(index, dummy.matrix);
     mesh.setColorAt(index, heatColor(row, metricKey, maxMetric));
