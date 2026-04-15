@@ -522,6 +522,15 @@ async function createApp() {
     })
   );
 
+  app.get(
+    "/api/admin/layout-locations",
+    requireAdminApi,
+    asyncHandler(async (req, res) => {
+      const locations = await service.getSnapshotLocations();
+      return res.json({ ok: true, locations });
+    })
+  );
+
   app.post(
     "/api/admin/layout-overrides",
     requireAdminApi,

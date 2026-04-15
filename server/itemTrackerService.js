@@ -910,6 +910,66 @@ class ItemTrackerService {
     };
   }
 
+  // Lightweight read of all location codes from the snapshot (no pick/catalog data).
+  // Used by the layout editor to render every block.
+  async getSnapshotLocations() {
+    const [layoutManifest, layoutOverrides, warehouseState] = await Promise.all([
+      this.loadLayoutManifest().catch(() => ({ zones: [] })),
+      this.getLayoutOverrides().catch(() => ({ virtual_locations: [] })),
+      this.loadWarehouseSnapshot()
+    ]);
+
+    const zoneIndex = new Map();
+    for (const zone of layoutManifest?.zones || []) {
+      for (const aisle of zone?.aisles || []) {
+        zoneIndex.set(aisle.prefix, zone.zone_key || "");
+      }
+    }
+
+    const seen = new Set();
+    const locations = [];
+
+    for (const row of warehouseState?.snapshot?.rows || []) {
+      const locationCode = String(row?.BLBINL || row?.["Bin Location"] || row?.bin_location || "").trim().toUpperCase();
+      if (!locationCode || seen.has(locationCode)) continue;
+      const status = String(row?.BLSTS || row?.status || "").trim().toUpperCase();
+      if (status && status !== "Y") continue;
+      seen.add(locationCode);
+
+      const parts = this.parseHeatmapLocation(locationCode);
+      const binSize = String(row?.BLSCOD || row?.["Bin Size"] || row?.bin_size || "").trim().toUpperCase();
+      locations.push({
+        location: locationCode,
+        aisle_prefix: parts.aisle_prefix,
+        bay: parts.bay,
+        level: parts.level,
+        slot: parts.slot,
+        zone_key: zoneIndex.get(parts.aisle_prefix) || "",
+        bin_size: binSize,
+        is_virtual: false
+      });
+    }
+
+    // Append virtual locations from overrides that aren't in the snapshot
+    for (const vl of layoutOverrides.virtual_locations || []) {
+      const loc = String(vl.location || "").trim().toUpperCase();
+      if (!loc || seen.has(loc)) continue;
+      const parts = this.parseHeatmapLocation(loc);
+      locations.push({
+        location: loc,
+        aisle_prefix: parts.aisle_prefix,
+        bay: parts.bay,
+        level: parts.level,
+        slot: parts.slot,
+        zone_key: zoneIndex.get(parts.aisle_prefix) || "",
+        bin_size: String(vl.bin_size || "").trim().toUpperCase(),
+        is_virtual: true
+      });
+    }
+
+    return locations;
+  }
+
   resolvePickSnapshotRange(pickRecords, options = {}) {
     const availableDates = (pickRecords || [])
       .map((record) => String(record?.snapshot_date || "").trim())

@@ -22,6 +22,7 @@ overrides.bin_sizes         = overrides.bin_sizes         || {};
 let dirty        = false;
 let selMode      = "zone";   // "zone" | "bay" | "location"
 let selection    = null;     // { type, key, label }
+let warehouseLocs = null;    // full location list fetched from /api/admin/layout-locations
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const canvas            = document.getElementById("editorCanvas");
@@ -51,6 +52,8 @@ const activeToggle        = document.getElementById("editorActiveToggle");
 const activeLabel         = document.getElementById("editorActiveLabel");
 const aisleSection        = document.getElementById("editorAisleSection");
 const aisleListWrap       = document.getElementById("editorAisleList");
+const reverseBayWrap      = document.getElementById("editorReverseBayWrap");
+const reverseBayToggle    = document.getElementById("editorReverseBay");
 
 // Bin sizes tab
 const binSizesList        = document.getElementById("binSizesList");
@@ -105,13 +108,14 @@ function computeZoneLayouts() {
     const visAisles = (zone.aisles || []).filter(a => (overrides.aisles[a.prefix] || {}).active !== false);
     const xOffset = Number(ovr.x_offset || 0);
     const zOffset = Number(ovr.z_offset || 0);
-    const rotY    = Number(ovr.rotation_y || 0);
+    const rotY        = Number(ovr.rotation_y || 0);
+    const reverseDir  = !!(ovr.reverse_bay_dir);
     const startX  = zoneOffsetX + xOffset;
     const width   = Math.max(visAisles.length - 1, 0) * aisleSpacing + 4;
     const depth   = 30;
     const centerX = startX + width / 2 - 2;
     const centerZ = zOffset - depth / 2 + 4;
-    result.push({ zone, key, active, visAisles, width, depth, centerX, centerZ, rotY });
+    result.push({ zone, key, active, visAisles, width, depth, centerX, centerZ, rotY, reverseDir });
     zoneOffsetX += visAisles.length * aisleSpacing + zoneGap;
   }
   return result;
@@ -124,7 +128,7 @@ function buildAisleCoords(zoneLayouts) {
   for (const z of zoneLayouts) {
     let baseX = z.centerX - (z.visAisles.length - 1) * aisleSpacing / 2;
     z.visAisles.forEach((aisle, i) => {
-      coords.set(aisle.prefix, { x: baseX + i * aisleSpacing, zoneDepth: z.depth, zoneZ: z.centerZ, rotY: z.rotY });
+      coords.set(aisle.prefix, { x: baseX + i * aisleSpacing, zoneDepth: z.depth, zoneZ: z.centerZ, rotY: z.rotY, reverseDir: z.reverseDir });
     });
   }
   return coords;
@@ -132,11 +136,10 @@ function buildAisleCoords(zoneLayouts) {
 
 // ── Build scene ────────────────────────────────────────────────────────────────
 function buildEditorScene() {
-  // Clear old
+  // Clear old meshes
   sc.zoneMeshes.forEach(m => sc.scene.remove(m));
   sc.zoneMeshes.clear();
-  sc.locMeshes.forEach(m => sc.scene.remove(m));
-  sc.locMeshes.clear();
+  sc.locMeshes.clear(); // instance refs — meshes removed via zoneMeshes above
 
   const zoneLayouts  = computeZoneLayouts();
   const aisleCoords  = buildAisleCoords(zoneLayouts);
@@ -180,81 +183,124 @@ function buildZoneBlocks(zoneLayouts, wireframeOnly = false) {
   });
 }
 
-// In bay/location mode: render each location as a small cube
+// In bay/location mode: render each location as a small cube via InstancedMesh for performance
 function buildLocationDots(aisleCoords) {
   const allLocations = getAllLocations(aisleCoords);
-  const geo = new THREE.BoxGeometry(0.9, 0.9, 0.7);
-  const matDefault  = new THREE.MeshStandardMaterial({ color: "#2a4a6a", roughness: 0.5, metalness: 0.1 });
-  const matSelected = new THREE.MeshStandardMaterial({ color: SEL_COLOR, roughness: 0.3 });
-  const matBay      = new THREE.MeshStandardMaterial({ color: BAY_COLOR, roughness: 0.4 });
-  const matLoc      = new THREE.MeshStandardMaterial({ color: LOC_COLOR, roughness: 0.3 });
-  const matVirtual  = new THREE.MeshStandardMaterial({ color: VIRTUAL_COLOR, roughness: 0.4 });
+  if (!allLocations.length) return;
+
+  const geo  = new THREE.BoxGeometry(0.88, 0.88, 0.68);
+  const dummy = new THREE.Object3D();
+
+  // Bucket locations by colour category
+  const buckets = {
+    selected: [],  // selected location
+    bay:      [],  // same bay as selected
+    virtual:  [],  // virtual
+    default:  [],  // everything else
+  };
+  const selBayPrefix = selection?.type === "bay"      ? selection.key : null;
+  const selLocKey    = selection?.type === "location"  ? selection.key : null;
 
   for (const loc of allLocations) {
-    let mat;
-    if (loc.is_virtual) {
-      mat = matVirtual;
-    } else if (selection?.type === "location" && selection?.key === loc.location) {
-      mat = matSelected;
-    } else if (selection?.type === "bay" && loc.location.startsWith(selection.key)) {
-      mat = matBay;
-    } else {
-      mat = matDefault;
-    }
-    const mesh = new THREE.Mesh(geo, mat);
-    mesh.position.set(loc.x, loc.y, loc.z);
-    mesh.userData = { type: "loc", key: loc.location, bayKey: loc.bayKey };
+    if      (selLocKey && loc.location === selLocKey)              buckets.selected.push(loc);
+    else if (selBayPrefix && loc.bayKey === selBayPrefix)          buckets.bay.push(loc);
+    else if (loc.is_virtual)                                        buckets.virtual.push(loc);
+    else                                                            buckets.default.push(loc);
+  }
+
+  const configs = [
+    { list: buckets.default,  color: "#2a4a6a", opacity: 1,   transparent: false },
+    { list: buckets.bay,      color: BAY_COLOR,  opacity: 1,   transparent: false },
+    { list: buckets.virtual,  color: VIRTUAL_COLOR, opacity: 1, transparent: false },
+    { list: buckets.selected, color: SEL_COLOR,  opacity: 1,   transparent: false },
+  ];
+
+  for (const { list, color } of configs) {
+    if (!list.length) continue;
+    const mat  = new THREE.MeshStandardMaterial({ color, roughness: 0.45, metalness: 0.1 });
+    const mesh = new THREE.InstancedMesh(geo, mat, list.length);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+
+    list.forEach((loc, i) => {
+      dummy.position.set(loc.x, loc.y, loc.z);
+      dummy.scale.set(1, 1, 1);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+      // Store userData on each instance via a parallel Map
+      sc.locMeshes.set(loc.location, { mesh, index: i, userData: { type: "loc", key: loc.location, bayKey: loc.bayKey } });
+    });
+
+    mesh.userData = { instancedLocs: list };
     sc.scene.add(mesh);
-    sc.locMeshes.set(loc.location, mesh);
+    sc.zoneMeshes.set("__locs__" + color, mesh); // register for raycasting via zoneMeshes reuse
   }
 }
 
-// Generate world positions for every known location code
+// Generate world positions for every known location.
+// Uses warehouseLocs (fetched from server) for the full set.
+// Falls back to locations derived from overrides if data not loaded yet.
 function getAllLocations(aisleCoords) {
+  const AISLE_HALF = 1.3;
   const result = [];
-  const aisleSpacing = 5.2;
 
-  // Build a set of all location codes from overrides (bays, locations, virtual)
-  // and infer position from aisle_prefix + bay + level + slot
-  const allCodes = new Set([
-    ...Object.keys(overrides.locations),
-    ...(overrides.virtual_locations || []).map(v => v.location)
-  ]);
-  // Also generate synthetic entries from bay overrides
-  for (const bayKey of Object.keys(overrides.bays)) {
-    const prefix = bayKey.slice(0, 2);
-    const bay    = bayKey.slice(2);
-    // Add placeholder entries for visualization
-    for (let level = 10; level <= 50; level += 10) {
-      for (let slot = 1; slot <= 2; slot++) {
-        allCodes.add(`${prefix}${bay}${String(level).padStart(2,"0")}0${slot}`);
-      }
-    }
-  }
+  // Source: full snapshot data if loaded, otherwise derive from overrides only
+  const source = warehouseLocs || deriveLocsFromOverrides();
 
-  for (const code of allCodes) {
-    const prefix = code.slice(0, 2).toUpperCase();
-    const digits = code.slice(2).replace(/\D/g, "");
-    const bay    = Number(digits.slice(0, 2)) || 0;
-    const level  = Number(digits.slice(2, 4)) || 10;
-    const slot   = Number(digits.slice(4, 6)) || 1;
-    const ac     = aisleCoords.get(prefix);
+  for (const row of source) {
+    const prefix = String(row.aisle_prefix || row.location?.slice(0, 2) || "").toUpperCase();
+    const ac = aisleCoords.get(prefix);
     if (!ac) continue;
 
-    const locOvr = overrides.locations[code] || {};
+    const bay   = Number(row.bay)   || 0;
+    const level = Number(row.level) || 10;
+    const slot  = Number(row.slot)  || 1;
+
+    const locOvr = overrides.locations[row.location] || {};
     const bayKey = prefix + String(bay).padStart(2, "0");
     const bayOvr = overrides.bays[bayKey] || {};
 
+    const bayPair   = Math.ceil(bay / 2);
+    const isEvenBay = (bay % 2) === 0;
+    const sideSign  = isEvenBay ? 1 : -1;
+    const depthSign = ac.reverseDir ? 1 : -1;
     const slotOffset = (slot % 2 === 1 ? -0.52 : 0.52);
-    const x = ac.x + slotOffset + Number(locOvr.x_offset || bayOvr.x_offset || 0);
-    const y = Math.max(0.45, Math.round(level / 10) * 1.18 + 0.6) + Number(locOvr.y_offset || 0);
-    const z = -(bay * 1.18) + Number(locOvr.z_offset || bayOvr.z_offset || 0);
-    const isVirtual = (overrides.virtual_locations || []).some(v => v.location === code);
 
-    result.push({ location: code, bayKey: prefix + String(bay).padStart(2,"0"), x, y, z, is_virtual: isVirtual });
+    const x = ac.x + sideSign * AISLE_HALF + slotOffset + Number(locOvr.x_offset || bayOvr.x_offset || 0);
+    const y = Math.max(0.45, Math.round(level / 10) * 1.18 + 0.6) + Number(locOvr.y_offset || 0);
+    const z = depthSign * -(bayPair * 1.18) + Number(locOvr.z_offset || bayOvr.z_offset || 0);
+
+    result.push({ location: row.location, bayKey, x, y, z, is_virtual: !!(row.is_virtual) });
   }
 
   return result;
+}
+
+// Fallback: derive a minimal location set from overrides when snapshot not yet loaded
+function deriveLocsFromOverrides() {
+  const codes = new Set([
+    ...Object.keys(overrides.locations),
+    ...(overrides.virtual_locations || []).map(v => v.location)
+  ]);
+  for (const bayKey of Object.keys(overrides.bays)) {
+    const prefix = bayKey.slice(0, 2);
+    const bay    = bayKey.slice(2);
+    for (let level = 10; level <= 50; level += 10) {
+      for (let slot = 1; slot <= 2; slot++) {
+        codes.add(`${prefix}${bay}${String(level).padStart(2,"0")}0${slot}`);
+      }
+    }
+  }
+  return Array.from(codes).map(code => {
+    const digits = code.slice(2).replace(/\D/g, "");
+    return {
+      location: code,
+      aisle_prefix: code.slice(0, 2).toUpperCase(),
+      bay:   digits.slice(0, 2),
+      level: digits.slice(2, 4),
+      slot:  digits.slice(4, 6),
+      is_virtual: (overrides.virtual_locations || []).some(v => v.location === code)
+    };
+  });
 }
 
 // ── Sprite label ───────────────────────────────────────────────────────────────
@@ -353,19 +399,30 @@ function handleCanvasClick(event) {
   sc.pointer.y = -((event.clientY - rect.top)  / rect.height) * 2 + 1;
   sc.raycaster.setFromCamera(sc.pointer, sc.camera);
 
-  const meshes = [...sc.zoneMeshes.values(), ...sc.locMeshes.values()];
-  const hits   = sc.raycaster.intersectObjects(meshes, false);
+  // Collect all clickable meshes (zone slabs + instanced location meshes)
+  const clickable = [];
+  sc.zoneMeshes.forEach(m => clickable.push(m));
+
+  const hits = sc.raycaster.intersectObjects(clickable, false);
   if (!hits.length) return;
 
-  const ud = hits[0].object.userData;
+  const hit = hits[0];
+  const ud  = hit.object.userData;
+
   if (ud.type === "zone" && selMode === "zone") {
     const zone = (layout.zones || []).find(z => z.zone_key === ud.key);
     if (zone) selectItem("zone", ud.key, zone.zone_label || ud.key, zone);
-  } else if (ud.type === "loc") {
+    return;
+  }
+
+  // InstancedMesh hit — resolve which location was clicked via instanceId
+  if (ud.instancedLocs && hit.instanceId != null) {
+    const loc = ud.instancedLocs[hit.instanceId];
+    if (!loc) return;
     if (selMode === "bay") {
-      selectItem("bay", ud.bayKey, ud.bayKey, null);
+      selectItem("bay", loc.bayKey, loc.bayKey, null);
     } else if (selMode === "location") {
-      selectItem("location", ud.key, ud.key, null);
+      selectItem("location", loc.location, loc.location, null);
     }
   }
 }
@@ -401,8 +458,9 @@ function showSelectionControls(type, key, label, zoneObj) {
   if (yOffsetWrap) yOffsetWrap.hidden = (type !== "location");
   // Show/hide rotation only for zone/bay
   if (rotationWrap) rotationWrap.hidden = (type === "location");
-  // Aisle list only for zones
-  if (aisleSection) aisleSection.hidden = (type !== "zone");
+  // Reverse bay direction + aisle list only for zones
+  if (reverseBayWrap) reverseBayWrap.hidden = (type !== "zone");
+  if (aisleSection)   aisleSection.hidden   = (type !== "zone");
 
   if (activeLabel) {
     activeLabel.textContent = type === "zone" ? "Zone visible in heatmap" :
@@ -415,11 +473,12 @@ function showSelectionControls(type, key, label, zoneObj) {
   if (type === "bay")      ovr = overrides.bays[key]      || {};
   if (type === "location") ovr = overrides.locations[key] || {};
 
-  if (xOffsetInput)    xOffsetInput.value     = String(ovr.x_offset   || 0);
-  if (yOffsetInput)    yOffsetInput.value      = String(ovr.y_offset   || 0);
-  if (zOffsetInput)    zOffsetInput.value      = String(ovr.z_offset   || 0);
-  if (rotationYSelect) rotationYSelect.value   = String(ovr.rotation_y || 0);
+  if (xOffsetInput)    xOffsetInput.value     = String(ovr.x_offset       || 0);
+  if (yOffsetInput)    yOffsetInput.value      = String(ovr.y_offset       || 0);
+  if (zOffsetInput)    zOffsetInput.value      = String(ovr.z_offset       || 0);
+  if (rotationYSelect) rotationYSelect.value   = String(ovr.rotation_y     || 0);
   if (activeToggle)    activeToggle.checked    = ovr.active !== false;
+  if (reverseBayToggle) reverseBayToggle.checked = !!(ovr.reverse_bay_dir);
 
   // Render aisle list for zones
   if (type === "zone" && zoneObj) renderAisleList(zoneObj);
@@ -508,7 +567,12 @@ function renderVirtualLocations() {
   virtualLocationsList.querySelectorAll(".virtual-loc-remove").forEach(btn => {
     btn.addEventListener("click", () => {
       const idx = Number(btn.dataset.index);
+      const removed = overrides.virtual_locations[idx]?.location;
       overrides.virtual_locations.splice(idx, 1);
+      if (warehouseLocs && removed) {
+        const li = warehouseLocs.findIndex(r => r.location === removed && r.is_virtual);
+        if (li !== -1) warehouseLocs.splice(li, 1);
+      }
       markDirty(); renderVirtualLocations(); buildEditorScene();
     });
   });
@@ -571,6 +635,15 @@ function wireControls() {
   rotationYSelect?.addEventListener("change", applyPositionOverride);
   activeToggle?.addEventListener("change", applyPositionOverride);
 
+  // Reverse bay direction (zone-only toggle)
+  reverseBayToggle?.addEventListener("change", () => {
+    if (!selection || selection.type !== "zone") return;
+    if (!overrides.zones[selection.key]) overrides.zones[selection.key] = {};
+    overrides.zones[selection.key].reverse_bay_dir = reverseBayToggle.checked;
+    markDirty();
+    buildEditorScene();
+  });
+
   // Sidebar tabs
   document.querySelectorAll(".editor-sidebar-tab").forEach(btn => {
     btn.addEventListener("click", () => {
@@ -611,6 +684,13 @@ function wireControls() {
     overrides.virtual_locations.push({ id: Date.now().toString(36), location: loc, bin_size: bs });
     if (virtualLocCode)    virtualLocCode.value    = "";
     if (virtualLocBinSize) virtualLocBinSize.value = "";
+    // Inject into live warehouseLocs so it renders immediately without a reload
+    if (warehouseLocs && !warehouseLocs.some(r => r.location === loc)) {
+      const digits = loc.slice(2).replace(/\D/g, "");
+      warehouseLocs.push({ location: loc, aisle_prefix: loc.slice(0,2).toUpperCase(),
+        bay: digits.slice(0,2), level: digits.slice(2,4), slot: digits.slice(4,6),
+        bin_size: bs, is_virtual: true });
+    }
     markDirty(); renderVirtualLocations(); buildEditorScene();
   });
 
@@ -647,6 +727,28 @@ function markDirty() {
   if (saveButton) saveButton.disabled = false;
 }
 
+// ── Load full warehouse location data ─────────────────────────────────────────
+async function loadWarehouseLocations() {
+  const hintEl = document.getElementById("editorHint");
+  const hintTx = document.getElementById("editorHintText");
+  if (hintTx) hintTx.textContent = "Loading warehouse locations…";
+  if (hintEl) hintEl.hidden = false;
+
+  try {
+    const res  = await fetch("/api/admin/layout-locations");
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !Array.isArray(data.locations)) throw new Error(data.error || "Failed to load");
+    warehouseLocs = data.locations;
+    buildEditorScene(); // rebuild with full data
+    if (hintTx) hintTx.textContent = selMode === "zone" ? "Click a zone to select" : "Click a block to select";
+    if (hintEl) hintEl.hidden = false;
+    if (zoneChip) zoneChip.textContent = `${(layout.zones || []).length} zone${(layout.zones || []).length === 1 ? "" : "s"} · ${warehouseLocs.length.toLocaleString()} locations`;
+  } catch (err) {
+    console.error("layout-editor: failed to load locations", err);
+    if (hintTx) hintTx.textContent = "⚠ Could not load locations — check server";
+  }
+}
+
 // ── Boot ───────────────────────────────────────────────────────────────────────
 if (canvas) {
   renderBinSizes();
@@ -655,4 +757,5 @@ if (canvas) {
   if (selectionControls) selectionControls.hidden = true;
   wireControls();
   initScene();
+  loadWarehouseLocations();
 }

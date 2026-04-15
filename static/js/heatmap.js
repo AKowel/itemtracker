@@ -212,6 +212,7 @@ function buildAisleCoords(layout, rows, overrides) {
         x: zoneStartX + aisleIndex * aisleSpacing,
         z_origin: zOffset,
         rotation_y: rotY,
+        reverse_bay_dir: !!(zoneOvr.reverse_bay_dir || (aisleOverrides[prefix] || {}).reverse_bay_dir),
         zoneIndex,
         zoneKey,
         zoneLabel: zone.zone_label || ""
@@ -222,7 +223,7 @@ function buildAisleCoords(layout, rows, overrides) {
     zone.layout = {
       x: zoneStartX + zoneWidth / 2 - 2,
       width: zoneWidth,
-      depth: Math.max(26, zoneMaxBay * 1.16 + 8),
+      depth: Math.max(26, Math.ceil(zoneMaxBay / 2) * 1.18 + 8),
       z_offset: zOffset,
       rotation_y: rotY
     };
@@ -467,19 +468,27 @@ function buildScene(rows, layout, metricKey, overrides) {
 
     const { w, h, d } = getCubeSize(row, binSizes);
 
-    // Slot offset scaled to cube width so bins pack correctly
+    // Odd/even bay pairing: bays 1&2 share depth position 1, bays 3&4 share position 2, etc.
+    // Odd bays sit on one face of the aisle, even bays on the opposite face.
+    const AISLE_HALF  = 1.3;  // X separation between the two faces of an aisle
+    const bayPair     = Math.ceil(bayNumber / 2);
+    const isEvenBay   = (bayNumber % 2) === 0;
+    const sideSign    = isEvenBay ? 1 : -1;
+    const depthSign   = aisle.reverse_bay_dir ? 1 : -1;
+
+    // Slot offset scaled to cube width so bins pack correctly side-by-side
     const slotOffset = ((slotNumber - 1) % 2 === 0 ? -w * 0.5 : w * 0.5);
     const rotY = aisle.rotation_y || 0;
     let x, z;
     if (rotY === 90 || rotY === -270) {
-      x = (aisle.z_origin || 0) - (bayNumber * 1.18) + extraX;
-      z = -(aisle.x + slotOffset) + extraZ;
+      x = (aisle.z_origin || 0) + depthSign * (bayPair * 1.18) + extraX;
+      z = -(aisle.x + sideSign * AISLE_HALF + slotOffset) + extraZ;
     } else if (rotY === -90 || rotY === 270) {
-      x = (aisle.z_origin || 0) + (bayNumber * 1.18) + extraX;
-      z = aisle.x + slotOffset + extraZ;
+      x = (aisle.z_origin || 0) - depthSign * (bayPair * 1.18) + extraX;
+      z = aisle.x + sideSign * AISLE_HALF + slotOffset + extraZ;
     } else {
-      x = aisle.x + slotOffset + extraX;
-      z = -(bayNumber * 1.18) + (aisle.z_origin || 0) + extraZ;
+      x = aisle.x + sideSign * AISLE_HALF + slotOffset + extraX;
+      z = depthSign * -(bayPair * 1.18) + (aisle.z_origin || 0) + extraZ;
     }
     const y = Math.max(h * 0.5, Math.round(levelNumber / 10) * 1.18 + h * 0.5) + extraY;
 
