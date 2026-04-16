@@ -13,6 +13,9 @@
         <span class="chip" id="heatmapLocationChip">0 locations</span>
         <span class="chip" id="heatmapPickChip">0 picks</span>
       </div>
+      <p class="heatmap-hero__actions">
+        <a href="/picking-reports" class="ghost-button">Open reports</a>
+      </p>
     </div>
   </section>
 
@@ -57,6 +60,32 @@
         </select>
       </label>
       <label class="field">
+        <span>Camera</span>
+        <select id="heatmapCameraModeSelect">
+          <option value="orbit">Perspective</option>
+          <option value="top">Top-down</option>
+          <option value="fps">FPS walk-through</option>
+        </select>
+      </label>
+      <label class="field">
+        <span>Colour mode</span>
+        <select id="heatmapColourModeSelect">
+          <option value="heatmap">Heatmap activity</option>
+          <option value="binsize">Bin size</option>
+          <option value="zone">Zone</option>
+          <option value="level">Level</option>
+        </select>
+      </label>
+      <label class="field heatmap-level-filter-field">
+        <span>Visible levels</span>
+        <div class="heatmap-level-filter">
+          <input type="number" id="heatmapLevelMin" min="0" max="99" placeholder="Min">
+          <span>to</span>
+          <input type="number" id="heatmapLevelMax" min="0" max="99" placeholder="Max">
+          <button type="button" class="ghost-button heatmap-level-reset" id="heatmapLevelResetButton">All</button>
+        </div>
+      </label>
+      <label class="field">
         <span>Find location or SKU</span>
         <input type="search" id="heatmapSearchInput" placeholder="WF441002 or SKU">
       </label>
@@ -68,6 +97,7 @@
         <input type="checkbox" id="heatmapOccupiedOnly">
         <span>Only occupied locations</span>
       </label>
+      <button type="button" class="ghost-button" id="heatmapResetCameraButton">Reset camera</button>
       <button type="button" id="heatmapReloadButton">Reload</button>
     </div>
   </section>
@@ -119,6 +149,11 @@
         <div class="heatmap-scene-hint" id="heatmapSceneHint">
           <strong>Full screen controls</strong>
           <span><code>W A S D</code> move the camera, mouse drag orbits, scroll zooms, <code>Esc</code> exits.</span>
+        </div>
+        <div class="heatmap-fps-overlay" id="heatmapFpsOverlay" hidden>
+          <div class="heatmap-fps-crosshair"></div>
+          <div class="heatmap-fps-chip" id="heatmapFpsModeChip">FPS Look Mode</div>
+          <div class="heatmap-fps-help">W A S D move · E / C up-down · mouse look · Tab toggles edit mode · Esc unlocks cursor</div>
         </div>
         <div class="heatmap-legend">
           <div class="heatmap-legend__bar"></div>

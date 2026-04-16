@@ -1461,6 +1461,14 @@ body.lightbox-open {
   max-width: 72ch;
 }
 
+.heatmap-hero__actions,
+.reports-hero__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
+
 .heatmap-toolbar-card,
 .heatmap-scene-card,
 .heatmap-sidebar {
@@ -1476,6 +1484,30 @@ body.lightbox-open {
 
 .heatmap-toolbar .field {
   min-width: 180px;
+}
+
+.heatmap-level-filter-field {
+  min-width: 260px;
+}
+
+.heatmap-level-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.heatmap-level-filter input {
+  width: 72px;
+}
+
+.heatmap-level-filter span {
+  color: var(--text-1);
+  font-size: 0.88rem;
+}
+
+.heatmap-level-reset {
+  padding-inline: 12px;
+  white-space: nowrap;
 }
 
 .heatmap-scene-actions {
@@ -1576,6 +1608,79 @@ body.lightbox-open {
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: rgba(236, 244, 255, 0.78);
+}
+
+.heatmap-fps-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 14;
+  pointer-events: none;
+}
+
+.heatmap-fps-overlay[hidden] {
+  display: none;
+}
+
+.heatmap-fps-crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 20px;
+  height: 20px;
+  transform: translate(-50%, -50%);
+}
+
+.heatmap-fps-crosshair::before,
+.heatmap-fps-crosshair::after {
+  content: "";
+  position: absolute;
+  background: rgba(244, 247, 255, 0.9);
+  border-radius: 999px;
+}
+
+.heatmap-fps-crosshair::before {
+  top: 50%;
+  left: 3px;
+  right: 3px;
+  height: 2px;
+  transform: translateY(-50%);
+}
+
+.heatmap-fps-crosshair::after {
+  left: 50%;
+  top: 3px;
+  bottom: 3px;
+  width: 2px;
+  transform: translateX(-50%);
+}
+
+.heatmap-fps-chip,
+.heatmap-fps-help {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: rgba(9, 15, 28, 0.82);
+  border: 1px solid rgba(145, 181, 255, 0.22);
+  backdrop-filter: blur(10px);
+  color: rgba(236, 244, 255, 0.94);
+  text-align: center;
+}
+
+.heatmap-fps-chip {
+  top: 18px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.heatmap-fps-help {
+  bottom: 18px;
+  max-width: min(92%, 560px);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .heatmap-sidebar {
@@ -1765,6 +1870,10 @@ body.lightbox-open {
     grid-template-columns: 1fr;
   }
 
+  .heatmap-level-filter {
+    flex-wrap: wrap;
+  }
+
   .heatmap-scene-wrap,
   #heatmapCanvas {
     min-height: 480px;
@@ -1779,6 +1888,84 @@ body.lightbox-open {
 }
 
 /* ── Heatmap settings panel ──────────────────────────────────────────────── */
+
+.reports-page {
+  display: grid;
+  gap: 18px;
+}
+
+.reports-hero p {
+  max-width: 74ch;
+}
+
+.reports-toolbar-card {
+  overflow: hidden;
+}
+
+.reports-metrics-grid {
+  grid-template-columns: repeat(6, minmax(160px, 1fr));
+}
+
+.reports-summary-wrap {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.reports-summary-card__item,
+.reports-idea-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid color-mix(in srgb, var(--line) 74%, white);
+  background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(241, 247, 255, 0.82));
+}
+
+.reports-summary-card__item strong,
+.reports-idea-card strong {
+  font-size: 1.05rem;
+  color: var(--text);
+}
+
+.reports-summary-card__item p,
+.reports-idea-card p {
+  margin: 0;
+  color: var(--text-1);
+  line-height: 1.5;
+}
+
+.reports-two-up {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.reports-ideas-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+@media (max-width: 1200px) {
+  .reports-metrics-grid {
+    grid-template-columns: repeat(3, minmax(180px, 1fr));
+  }
+
+  .reports-summary-wrap,
+  .reports-ideas-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .reports-two-up,
+  .reports-summary-wrap,
+  .reports-ideas-grid,
+  .reports-metrics-grid {
+    grid-template-columns: 1fr;
+  }
+}
 
 .heatmap-settings-panel {
   position: absolute;

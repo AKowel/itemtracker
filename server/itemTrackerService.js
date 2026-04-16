@@ -293,6 +293,56 @@ function pickActivitySnapshotMeta(record, source = "pocketbase") {
   };
 }
 
+function pickMetricValue(entry, metricKey = "pick_count") {
+  return metricKey === "pick_qty"
+    ? safeNumber(entry?.pick_qty || 0)
+    : Number(entry?.pick_count || 0);
+}
+
+function sortPickReportRows(rows, metricKey = "pick_count", labelKey = "label") {
+  return [...(rows || [])].sort((a, b) => {
+    const metricDiff = pickMetricValue(b, metricKey) - pickMetricValue(a, metricKey);
+    if (metricDiff !== 0) {
+      return metricDiff;
+    }
+    const pickCountDiff = Number(b?.pick_count || 0) - Number(a?.pick_count || 0);
+    if (pickCountDiff !== 0) {
+      return pickCountDiff;
+    }
+    const pickQtyDiff = safeNumber(b?.pick_qty || 0) - safeNumber(a?.pick_qty || 0);
+    if (pickQtyDiff !== 0) {
+      return pickQtyDiff;
+    }
+    return String(a?.[labelKey] || "").localeCompare(String(b?.[labelKey] || ""));
+  });
+}
+
+function buildOutlierRows(rows, metricKey = "pick_count", limit = 12) {
+  const candidates = (rows || []).filter((row) => pickMetricValue(row, metricKey) > 0);
+  if (candidates.length < 3) {
+    return [];
+  }
+
+  const values = candidates.map((row) => pickMetricValue(row, metricKey));
+  const mean = values.reduce((sum, value) => sum + value, 0) / values.length;
+  const variance = values.reduce((sum, value) => sum + ((value - mean) ** 2), 0) / values.length;
+  const standardDeviation = Math.sqrt(variance);
+  if (!Number.isFinite(standardDeviation) || standardDeviation <= 0) {
+    return [];
+  }
+
+  const threshold = mean + standardDeviation * 2;
+  return candidates
+    .filter((row) => pickMetricValue(row, metricKey) >= threshold)
+    .map((row) => ({
+      ...row,
+      outlier_score: (pickMetricValue(row, metricKey) - mean) / standardDeviation,
+      outlier_threshold: threshold
+    }))
+    .sort((a, b) => (b.outlier_score - a.outlier_score) || (pickMetricValue(b, metricKey) - pickMetricValue(a, metricKey)))
+    .slice(0, Math.max(1, limit));
+}
+
 class ItemTrackerService {
   constructor(config) {
     this.config = config;
@@ -1042,6 +1092,14 @@ class ItemTrackerService {
         requestedStartDate = latestAvailableDate;
         requestedEndDate = latestAvailableDate;
       }
+    } else if (mode === "last_90") {
+      requestedEndDate = latestAvailableDate;
+      const end = parseDateText(latestAvailableDate) || new Date();
+      requestedStartDate = formatDateText(addUtcDays(end, -89));
+    } else if (mode === "last_60") {
+      requestedEndDate = latestAvailableDate;
+      const end = parseDateText(latestAvailableDate) || new Date();
+      requestedStartDate = formatDateText(addUtcDays(end, -59));
     } else if (mode === "last_30") {
       requestedEndDate = latestAvailableDate;
       const end = parseDateText(latestAvailableDate) || new Date();
@@ -1411,6 +1469,259 @@ class ItemTrackerService {
           .sort((a, b) => (b.pick_count - a.pick_count) || (b.pick_qty - a.pick_qty))
           .slice(0, 8)
       }
+    };
+  }
+
+  async getPickingReports(clientCode = DEFAULT_CLIENT_CODE, options = {}) {
+    const targetClient = String(clientCode || DEFAULT_CLIENT_CODE).trim().toUpperCase();
+    const rankBy = String(options.rankBy || "").trim().toLowerCase() === "pick_qty" ? "pick_qty" : "pick_count";
+    const limit = Math.max(10, Math.min(250, Number.parseInt(options.limit || "50", 10) || 50));
+
+    const [pickRecords, catalogState] = await Promise.all([
+      this.listPickActivitySnapshotRecords(targetClient, 90).catch(() => []),
+      this.loadSnapshot(targetClient).catch(() => ({ snapshot: null, meta: this.snapshotMeta(null, "none") }))
+    ]);
+
+    const range = this.resolvePickSnapshotRange(pickRecords, {
+      mode: options.mode,
+      snapshotDate: options.snapshotDate,
+      startDate: options.startDate,
+      endDate: options.endDate
+    });
+
+    const catalogItems = new Map();
+    for (const item of catalogState?.snapshot?.items || []) {
+      const sku = normalizeSku(item?.sku);
+      if (sku) {
+        catalogItems.set(sku, item);
+      }
+    }
+
+    const skuMap = new Map();
+    const locationMap = new Map();
+    const aisleMap = new Map();
+    const dailyMap = new Map();
+    const pickLoadedDates = [];
+    let totalPickCount = 0;
+    let totalPickQty = 0;
+
+    if (range.matchedDates.length) {
+      const snapshots = await Promise.all(
+        range.matchedDates.map((date) => this.loadPickActivitySnapshot(date, targetClient))
+      );
+
+      for (const snapshotState of snapshots) {
+        const snapshot = snapshotState?.snapshot || null;
+        if (!snapshot) {
+          continue;
+        }
+
+        const snapshotDate = String(snapshot.snapshot_date || snapshotState?.meta?.snapshot_date || "").trim();
+        if (snapshotDate) {
+          pickLoadedDates.push(snapshotDate);
+        }
+
+        totalPickCount += Number(snapshot.total_pick_count || 0);
+        totalPickQty += safeNumber(snapshot.total_pick_qty || 0);
+
+        const dayEntry = dailyMap.get(snapshotDate) || {
+          date: snapshotDate,
+          pick_count: 0,
+          pick_qty: 0,
+          _skuSet: new Set(),
+          _locationSet: new Set(),
+          _aisleSet: new Set()
+        };
+        dayEntry.pick_count += Number(snapshot.total_pick_count || 0);
+        dayEntry.pick_qty += safeNumber(snapshot.total_pick_qty || 0);
+
+        for (const row of snapshot.rows || []) {
+          const location = String(row?.location || "").trim().toUpperCase();
+          const aislePrefix = String(row?.aisle_prefix || "").trim().toUpperCase();
+          let locationEntry = null;
+          let aisleEntry = null;
+
+          if (location) {
+            locationEntry = locationMap.get(location) || {
+              label: location,
+              location,
+              aisle_prefix: aislePrefix,
+              bay: String(row?.bay || "").trim(),
+              level: String(row?.level || "").trim(),
+              slot: String(row?.slot || "").trim(),
+              pick_count: 0,
+              pick_qty: 0,
+              _daySet: new Set(),
+              _skuSet: new Set()
+            };
+            locationEntry.pick_count += Number(row?.pick_count || 0);
+            locationEntry.pick_qty += safeNumber(row?.pick_qty || 0);
+            if (snapshotDate) {
+              locationEntry._daySet.add(snapshotDate);
+            }
+            locationMap.set(location, locationEntry);
+            if (snapshotDate) {
+              dayEntry._locationSet.add(location);
+            }
+          }
+
+          if (aislePrefix) {
+            aisleEntry = aisleMap.get(aislePrefix) || {
+              label: aislePrefix,
+              aisle_prefix: aislePrefix,
+              pick_count: 0,
+              pick_qty: 0,
+              _daySet: new Set(),
+              _locationSet: new Set(),
+              _skuSet: new Set()
+            };
+            aisleEntry.pick_count += Number(row?.pick_count || 0);
+            aisleEntry.pick_qty += safeNumber(row?.pick_qty || 0);
+            if (snapshotDate) {
+              aisleEntry._daySet.add(snapshotDate);
+              dayEntry._aisleSet.add(aislePrefix);
+            }
+            if (location) {
+              aisleEntry._locationSet.add(location);
+            }
+            aisleMap.set(aislePrefix, aisleEntry);
+          }
+
+          for (const skuRow of row?.top_skus || []) {
+            const sku = normalizeSku(skuRow?.sku);
+            if (!sku) {
+              continue;
+            }
+
+            const catalogItem = catalogItems.get(sku) || null;
+            const skuEntry = skuMap.get(sku) || {
+              label: sku,
+              sku,
+              description: catalogItem?.description || catalogItem?.description_short || "",
+              pick_count: 0,
+              pick_qty: 0,
+              _daySet: new Set(),
+              _locationSet: new Set(),
+              _aisleSet: new Set()
+            };
+            skuEntry.pick_count += Number(skuRow?.pick_count || 0);
+            skuEntry.pick_qty += safeNumber(skuRow?.pick_qty || 0);
+            if (snapshotDate) {
+              skuEntry._daySet.add(snapshotDate);
+            }
+            if (location) {
+              skuEntry._locationSet.add(location);
+              locationEntry?._skuSet.add(sku);
+            }
+            if (aislePrefix) {
+              skuEntry._aisleSet.add(aislePrefix);
+              aisleEntry?._skuSet.add(sku);
+            }
+            if (snapshotDate) {
+              dayEntry._skuSet.add(sku);
+            }
+            skuMap.set(sku, skuEntry);
+          }
+        }
+
+        dailyMap.set(snapshotDate, dayEntry);
+      }
+    }
+
+    const dailyBreakdown = Array.from(dailyMap.values())
+      .map((entry) => ({
+        date: entry.date,
+        pick_count: entry.pick_count,
+        pick_qty: entry.pick_qty,
+        location_count: entry._locationSet.size,
+        aisle_count: entry._aisleSet.size,
+        sku_count: entry._skuSet.size,
+        avg_qty_per_pick: entry.pick_count ? entry.pick_qty / entry.pick_count : 0
+      }))
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+
+    const topSkus = Array.from(skuMap.values()).map((entry) => ({
+      sku: entry.sku,
+      label: entry.label,
+      description: entry.description,
+      pick_count: entry.pick_count,
+      pick_qty: entry.pick_qty,
+      day_count: entry._daySet.size,
+      location_count: entry._locationSet.size,
+      aisle_count: entry._aisleSet.size,
+      avg_qty_per_pick: entry.pick_count ? entry.pick_qty / entry.pick_count : 0,
+      share_of_picks: totalPickCount ? (entry.pick_count / totalPickCount) * 100 : 0
+    }));
+
+    const topLocations = Array.from(locationMap.values()).map((entry) => ({
+      location: entry.location,
+      label: entry.label,
+      aisle_prefix: entry.aisle_prefix,
+      bay: entry.bay,
+      level: entry.level,
+      slot: entry.slot,
+      pick_count: entry.pick_count,
+      pick_qty: entry.pick_qty,
+      day_count: entry._daySet.size,
+      sku_count: entry._skuSet.size,
+      avg_qty_per_pick: entry.pick_count ? entry.pick_qty / entry.pick_count : 0
+    }));
+
+    const topAisles = Array.from(aisleMap.values()).map((entry) => ({
+      aisle_prefix: entry.aisle_prefix,
+      label: entry.label,
+      pick_count: entry.pick_count,
+      pick_qty: entry.pick_qty,
+      day_count: entry._daySet.size,
+      location_count: entry._locationSet.size,
+      sku_count: entry._skuSet.size,
+      avg_qty_per_pick: entry.pick_count ? entry.pick_qty / entry.pick_count : 0
+    }));
+
+    const loadedDayCount = dailyBreakdown.length;
+    const peakDay = sortPickReportRows(dailyBreakdown, rankBy, "date")[0] || null;
+
+    return {
+      meta: {
+        client_code: targetClient,
+        report_type: "picking",
+        sort_metric: rankBy,
+        limit,
+        available_pick_dates: range.availableDates,
+        pick_loaded_dates: pickLoadedDates,
+        pick_range_mode: range.mode,
+        pick_requested_start_date: range.resolvedStartDate,
+        pick_requested_end_date: range.resolvedEndDate,
+        pick_requested_day_count: range.requestedDates.length,
+        pick_available_day_count: range.matchedDates.length,
+        pick_missing_dates: range.missingDates,
+        latest_pick_snapshot_date: range.latestAvailableDate,
+        item_catalog_meta: catalogState?.meta || this.snapshotMeta(null, "none"),
+        sku_detail_source: "Published snapshot SKU detail",
+        sku_detail_note: "SKU rankings are aggregated from the SKU detail stored inside each published pick snapshot."
+      },
+      summary: {
+        loaded_day_count: loadedDayCount,
+        total_pick_count: totalPickCount,
+        total_pick_qty: totalPickQty,
+        active_sku_count: topSkus.length,
+        active_location_count: topLocations.length,
+        active_aisle_count: topAisles.length,
+        avg_qty_per_pick: totalPickCount ? totalPickQty / totalPickCount : 0,
+        avg_picks_per_day: loadedDayCount ? totalPickCount / loadedDayCount : 0,
+        avg_qty_per_day: loadedDayCount ? totalPickQty / loadedDayCount : 0,
+        avg_picks_per_active_sku: topSkus.length ? totalPickCount / topSkus.length : 0,
+        avg_picks_per_active_location: topLocations.length ? totalPickCount / topLocations.length : 0,
+        peak_day_date: peakDay?.date || "",
+        peak_day_pick_count: Number(peakDay?.pick_count || 0),
+        peak_day_pick_qty: safeNumber(peakDay?.pick_qty || 0)
+      },
+      top_skus: sortPickReportRows(topSkus, rankBy, "sku").slice(0, limit),
+      top_locations: sortPickReportRows(topLocations, rankBy, "location").slice(0, 25),
+      top_aisles: sortPickReportRows(topAisles, rankBy, "aisle_prefix").slice(0, 20),
+      sku_outliers: buildOutlierRows(topSkus, rankBy, 16),
+      location_outliers: buildOutlierRows(topLocations, rankBy, 16),
+      daily_breakdown: dailyBreakdown
     };
   }
 

@@ -172,6 +172,16 @@ That snapshot is merged into hosted and local catalogue search so extra box barc
 - Nginx reverse proxy
 - `html5-qrcode` for fallback mobile barcode scanning
 
+## Warehouse Editor
+
+The companion desktop app for building and calibrating the 3D warehouse layout is
+documented separately:
+
+→ **[WAREHOUSE_EDITOR.md](./WAREHOUSE_EDITOR.md)**
+
+It covers: setup, publishing overrides to this server, the full feature list, and
+the planned 3D heatmap viewer integration.
+
 ## Important Files
 
 - App entry: [server.js](./server.js)
@@ -209,6 +219,8 @@ copy .env.example .env
 - `POCKETBASE_ADMIN_PASSWORD` for that same PocketBase superuser
 - `APP_BASE_URL`
 - optionally `ADMIN_EMAILS`
+- optionally `ADMIN_API_KEY` — static key for the warehouse editor "Publish" feature
+  (generate with `openssl rand -hex 32`)
 
 4. Bootstrap collections:
 

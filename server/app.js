@@ -589,6 +589,16 @@ async function createApp() {
   );
 
   app.get(
+    "/picking-reports",
+    requireAdminPage,
+    asyncHandler(async (req, res) => {
+      return res.render("picking-reports", {
+        pageTitle: `Picking Reports | ${config.appName}`
+      });
+    })
+  );
+
+  app.get(
     "/admin",
     requireAdminPage,
     asyncHandler(async (req, res) => {
@@ -609,6 +619,22 @@ async function createApp() {
         endDate: String(req.query.end || "").trim()
       });
       return res.json({ ok: true, heatmap });
+    })
+  );
+
+  app.get(
+    "/api/admin/picking-reports",
+    requireAdminApi,
+    asyncHandler(async (req, res) => {
+      const reports = await service.getPickingReports(undefined, {
+        mode: String(req.query.mode || "").trim(),
+        snapshotDate: String(req.query.date || "").trim(),
+        startDate: String(req.query.start || "").trim(),
+        endDate: String(req.query.end || "").trim(),
+        rankBy: String(req.query.rankBy || "").trim(),
+        limit: String(req.query.limit || "").trim()
+      });
+      return res.json({ ok: true, reports });
     })
   );
 
