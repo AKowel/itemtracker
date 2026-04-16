@@ -33,6 +33,12 @@ const highLevelPicksMetric = doc?.getElementById("reportsHighLevelPicksMetric") 
 const estimatedReplenishmentsMetric = doc?.getElementById("reportsEstimatedReplenishmentsMetric") || null;
 
 const summaryWrap = doc?.getElementById("reportsSummaryWrap") || null;
+const recommendationsSummaryWrap = doc?.getElementById("reportsRecommendationsSummaryWrap") || null;
+const moveLowerWrap = doc?.getElementById("reportsMoveLowerWrap") || null;
+const bulkToPickWrap = doc?.getElementById("reportsBulkToPickWrap") || null;
+const abcVelocityWrap = doc?.getElementById("reportsAbcVelocityWrap") || null;
+const levelComplianceWrap = doc?.getElementById("reportsLevelComplianceWrap") || null;
+const pickFaceSuitabilityWrap = doc?.getElementById("reportsPickFaceSuitabilityWrap") || null;
 const topSkusWrap = doc?.getElementById("reportsTopSkusWrap") || null;
 const skuOutliersWrap = doc?.getElementById("reportsSkuOutliersWrap") || null;
 const locationOutliersWrap = doc?.getElementById("reportsLocationOutliersWrap") || null;
@@ -345,6 +351,172 @@ function renderSummary(reports) {
   `;
 }
 
+function renderRecommendationsSummary(reports) {
+  if (!recommendationsSummaryWrap) return;
+  const recommendations = reports?.recommendations || {};
+  const summary = recommendations.summary || {};
+  const abcSummary = Array.isArray(recommendations.abc_velocity?.summary) ? recommendations.abc_velocity.summary : [];
+  const abcLabels = abcSummary
+    .map((entry) => `${escapeHtml(entry.abc_class || "")}: ${formatInteger(entry.sku_count || 0)} SKU(s)`)
+    .join(" · ");
+  const abcMixLabel = String(abcLabels || "")
+    .replace(/[^ -~]+/g, " | ")
+    .replace(/\s+\|\s+/g, " | ")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  recommendationsSummaryWrap.innerHTML = `
+    <article class="reports-summary-card__item">
+      <span class="eyebrow">Move lower</span>
+      <strong>${formatInteger(summary.move_lower_candidate_count || 0)}</strong>
+      <p>SKUs whose high-level activity and velocity make them good candidates to move down first.</p>
+    </article>
+    <article class="reports-summary-card__item">
+      <span class="eyebrow">Bulk to pick</span>
+      <strong>${formatInteger(summary.move_to_pick_bin_candidate_count || 0)}</strong>
+      <p>SKUs that are still doing too much work from bulk bins and likely need a better pick face.</p>
+    </article>
+    <article class="reports-summary-card__item">
+      <span class="eyebrow">Pick-face issues</span>
+      <strong>${formatInteger(summary.pick_face_issue_count || 0)}</strong>
+      <p>Pick faces with capacity, level, or bin-size signals that deserve a closer look.</p>
+    </article>
+    <article class="reports-summary-card__item">
+      <span class="eyebrow">ABC mix</span>
+      <strong>${abcMixLabel || "No ABC data yet"}</strong>
+      <p>Velocity classes are based on the current ranking metric and range, so the mix shifts with the filter window.</p>
+    </article>
+    <article class="reports-summary-card__item">
+      <span class="eyebrow">Level easy wins</span>
+      <strong>${formatInteger(summary.level_compliance_easy_win_count || 0)}</strong>
+      <p>High-level picking opportunities that look easiest to attack first.</p>
+    </article>
+    <article class="reports-summary-card__item">
+      <span class="eyebrow">Scoring note</span>
+      <strong>Weighted recommendations</strong>
+      <p>${escapeHtml(summary.recommendation_note || reports?.meta?.recommendation_note || "Scores combine activity, level position, replenishment burden, and ABC velocity.")}</p>
+    </article>
+  `;
+}
+
+function renderMoveLower(reports) {
+  renderTable(
+    moveLowerWrap,
+    Array.isArray(reports?.recommendations?.slotting?.move_lower) ? reports.recommendations.slotting.move_lower : [],
+    [
+      { label: "SKU", render: (row) => `<strong>${escapeHtml(row.sku)}</strong>` },
+      { label: "ABC", render: (row) => escapeHtml(row.abc_class || "-") },
+      { label: "Score", render: (row) => formatDecimal(row.move_lower_score || 0, 1) },
+      { label: "High-level share", render: (row) => formatPercent(row.high_level_share || 0, 1) },
+      { label: "High-level picks", render: (row) => formatInteger(row.high_level_pick_count || 0) },
+      { label: "Lower picks", render: (row) => formatInteger(row.low_level_pick_count || 0) },
+      { label: "Action", render: (row) => escapeHtml(row.suggested_action || "-") }
+    ],
+    "No move-lower recommendations are available for the selected range."
+  );
+}
+
+function renderBulkToPick(reports) {
+  renderTable(
+    bulkToPickWrap,
+    Array.isArray(reports?.recommendations?.slotting?.move_to_pick_bin) ? reports.recommendations.slotting.move_to_pick_bin : [],
+    [
+      { label: "SKU", render: (row) => `<strong>${escapeHtml(row.sku)}</strong>` },
+      { label: "ABC", render: (row) => escapeHtml(row.abc_class || "-") },
+      { label: "Score", render: (row) => formatDecimal(row.move_to_pick_bin_score || 0, 1) },
+      { label: "Bulk share", render: (row) => formatPercent(row.bulk_share || 0, 1) },
+      { label: "Bulk picks", render: (row) => formatInteger(row.bulk_bin_pick_count || 0) },
+      { label: "Pick-face picks", render: (row) => formatInteger(row.pick_bin_pick_count || 0) },
+      { label: "Action", render: (row) => escapeHtml(row.suggested_action || "-") }
+    ],
+    "No bulk-to-pick recommendations are available for the selected range."
+  );
+}
+
+function renderAbcVelocity(reports) {
+  renderTable(
+    abcVelocityWrap,
+    Array.isArray(reports?.recommendations?.abc_velocity?.skus) ? reports.recommendations.abc_velocity.skus : [],
+    [
+      { label: "ABC", render: (row) => `<strong>${escapeHtml(row.abc_class || "-")}</strong>` },
+      { label: "SKU", render: (row) => escapeHtml(row.sku || "-") },
+      { label: "Picks", render: (row) => formatInteger(row.pick_count || 0) },
+      { label: "Qty", render: (row) => formatInteger(row.pick_qty || 0) },
+      { label: "Metric share", render: (row) => formatPercent(row.metric_share || 0, 1) },
+      { label: "Cum. share", render: (row) => formatPercent(row.cumulative_metric_share || 0, 1) },
+      { label: "High-level picks", render: (row) => formatInteger(row.high_level_pick_count || 0) }
+    ],
+    "No ABC velocity rows are available for the selected range."
+  );
+}
+
+function renderLevelCompliance(reports) {
+  if (!levelComplianceWrap) return;
+  const levelCompliance = reports?.recommendations?.level_compliance || {};
+  const summary = levelCompliance.summary || {};
+  const rows = Array.isArray(levelCompliance.easy_wins) ? levelCompliance.easy_wins : [];
+  const summaryHtml = `
+    <div class="reports-summary-wrap" style="margin-bottom:1rem;">
+      <article class="reports-summary-card__item">
+        <span class="eyebrow">Compliant picks</span>
+        <strong>${formatInteger(summary.compliant_pick_count || 0)}</strong>
+        <p>${formatPercent(summary.compliant_share_of_picks || 0, 1)} of picks are currently below level ${formatInteger((summary.threshold || 10) - 1)}.</p>
+      </article>
+      <article class="reports-summary-card__item">
+        <span class="eyebrow">High-level picks</span>
+        <strong>${formatInteger(summary.high_level_pick_count || 0)}</strong>
+        <p>${formatPercent(summary.high_level_share_of_picks || 0, 1)} of picks are still happening at level ${formatInteger(summary.threshold || 10)}+.</p>
+      </article>
+      <article class="reports-summary-card__item">
+        <span class="eyebrow">High-level SKUs</span>
+        <strong>${formatInteger(summary.high_level_sku_count || 0)}</strong>
+        <p>Distinct SKUs with meaningful activity above the target level threshold.</p>
+      </article>
+      <article class="reports-summary-card__item">
+        <span class="eyebrow">Easy wins</span>
+        <strong>${formatInteger(summary.easy_win_count || 0)}</strong>
+        <p>Rows below are the easiest first moves because they are heavily high-level and have weak lower-level coverage.</p>
+      </article>
+    </div>
+  `;
+
+  const tableHost = document.createElement("div");
+  renderTable(
+    tableHost,
+    rows,
+    [
+      { label: "SKU", render: (row) => `<strong>${escapeHtml(row.sku)}</strong>` },
+      { label: "ABC", render: (row) => escapeHtml(row.abc_class || "-") },
+      { label: "Score", render: (row) => formatDecimal(row.move_lower_score || 0, 1) },
+      { label: "High-level share", render: (row) => formatPercent(row.high_level_share || 0, 1) },
+      { label: "High-level picks", render: (row) => formatInteger(row.high_level_pick_count || 0) },
+      { label: "Lower picks", render: (row) => formatInteger(row.low_level_pick_count || 0) }
+    ],
+    "No easy-win level compliance rows are available for the selected range."
+  );
+
+  levelComplianceWrap.innerHTML = `${summaryHtml}${tableHost.innerHTML}`;
+}
+
+function renderPickFaceSuitability(reports) {
+  renderTable(
+    pickFaceSuitabilityWrap,
+    Array.isArray(reports?.recommendations?.pick_face_suitability) ? reports.recommendations.pick_face_suitability : [],
+    [
+      { label: "Location", render: (row) => `<strong>${escapeHtml(row.location)}</strong>` },
+      { label: "SKU", render: (row) => escapeHtml(row.sku || "-") },
+      { label: "ABC", render: (row) => escapeHtml(row.abc_class || "-") },
+      { label: "Level", render: (row) => escapeHtml(row.level || "-") },
+      { label: "Bin size", render: (row) => escapeHtml(row.bin_size || "-") },
+      { label: "Score", render: (row) => formatDecimal(row.suitability_score || 0, 1) },
+      { label: "Est. repl.", render: (row) => formatInteger(row.estimated_replenishments || 0) },
+      { label: "Cover at max", render: (row) => row.days_of_cover_at_max ? `${formatDecimal(row.days_of_cover_at_max || 0, 1)} days` : "-" },
+      { label: "Issues", render: (row) => escapeHtml(row.issue_summary || "-") }
+    ],
+    "No pick-face suitability rows are available for the selected range."
+  );
+}
+
 function renderMetrics(reports) {
   const summary = reports?.summary || {};
   if (totalPicksMetric) totalPicksMetric.textContent = formatInteger(summary.total_pick_count || 0);
@@ -622,6 +794,12 @@ function renderReports(reports) {
   renderHeroChips(reports);
   renderMetrics(reports);
   renderSummary(reports);
+  renderRecommendationsSummary(reports);
+  renderMoveLower(reports);
+  renderBulkToPick(reports);
+  renderAbcVelocity(reports);
+  renderLevelCompliance(reports);
+  renderPickFaceSuitability(reports);
   renderTopSkus(reports);
   renderSkuOutliers(reports);
   renderLocationOutliers(reports);
@@ -655,6 +833,13 @@ async function loadReports() {
       bin_size_breakdown: [],
       high_level_skus: [],
       replenishment: { summary: {}, locations: [] },
+      recommendations: {
+        summary: {},
+        abc_velocity: { summary: [], skus: [] },
+        slotting: { move_lower: [], move_to_pick_bin: [] },
+        level_compliance: { summary: {}, easy_wins: [] },
+        pick_face_suitability: []
+      },
       daily_breakdown: []
     };
     const meta = reports.meta || {};
@@ -686,7 +871,10 @@ async function loadReports() {
     if (summaryWrap) {
       summaryWrap.innerHTML = `<p class="admin-empty">${escapeHtml(error.message || "Could not load the reports.")}</p>`;
     }
-    [topSkusWrap, skuOutliersWrap, locationOutliersWrap, topLocationsWrap, topAislesWrap, levelBreakdownWrap, binTypeWrap, binSizeWrap, highLevelSkusWrap, replenishmentWrap, dailyWrap].forEach((wrapper) => {
+    if (recommendationsSummaryWrap) {
+      recommendationsSummaryWrap.innerHTML = `<p class="admin-empty">${escapeHtml(error.message || "Could not load the recommendation summary.")}</p>`;
+    }
+    [moveLowerWrap, bulkToPickWrap, abcVelocityWrap, levelComplianceWrap, pickFaceSuitabilityWrap, topSkusWrap, skuOutliersWrap, locationOutliersWrap, topLocationsWrap, topAislesWrap, levelBreakdownWrap, binTypeWrap, binSizeWrap, highLevelSkusWrap, replenishmentWrap, dailyWrap].forEach((wrapper) => {
       if (wrapper) {
         wrapper.innerHTML = '<p class="admin-empty">Could not load this report section.</p>';
       }

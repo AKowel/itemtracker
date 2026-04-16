@@ -93,6 +93,7 @@
     </div>
     <div class="reports-tab-list" role="tablist" aria-label="Picking report tabs">
       <button type="button" class="reports-tab is-active" data-report-tab="overview" aria-selected="true">Overview</button>
+      <button type="button" class="reports-tab" data-report-tab="recommendations" aria-selected="false">Recommendations</button>
       <button type="button" class="reports-tab" data-report-tab="sku" aria-selected="false">SKUs</button>
       <button type="button" class="reports-tab" data-report-tab="locations" aria-selected="false">Locations</button>
       <button type="button" class="reports-tab" data-report-tab="structure" aria-selected="false">Structure</button>
@@ -177,6 +178,90 @@
         </div>
       </div>
       <div id="reportsDailyWrap">
+        <p class="admin-loading">Loading...</p>
+      </div>
+    </section>
+  </section>
+
+  <section class="reports-tab-panel" data-report-panel="recommendations" hidden>
+    <section class="panel-card reports-summary-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Recommendation Engine</p>
+          <h2>Action Summary</h2>
+          <p>These scores combine pick activity, levels, replenishment pressure, bulk-vs-pick behaviour, and ABC velocity to surface the changes worth looking at first.</p>
+        </div>
+      </div>
+      <div id="reportsRecommendationsSummaryWrap" class="reports-summary-wrap">
+        <p class="admin-loading">Loading...</p>
+      </div>
+    </section>
+
+    <section class="reports-two-up">
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Slotting</p>
+            <h2>Move Lower</h2>
+            <p>Fast movers still working too high up and likely to benefit from a lower pick face.</p>
+          </div>
+        </div>
+        <div id="reportsMoveLowerWrap">
+          <p class="admin-loading">Loading...</p>
+        </div>
+      </section>
+
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Slotting</p>
+            <h2>Bulk To Pick</h2>
+            <p>SKUs whose demand suggests they should have a better pick-face setup instead of leaning on bulk bins.</p>
+          </div>
+        </div>
+        <div id="reportsBulkToPickWrap">
+          <p class="admin-loading">Loading...</p>
+        </div>
+      </section>
+    </section>
+
+    <section class="reports-two-up">
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Velocity</p>
+            <h2>ABC Classes</h2>
+            <p>Automatic A/B/C velocity grouping based on the current ranking metric and selected date range.</p>
+          </div>
+        </div>
+        <div id="reportsAbcVelocityWrap">
+          <p class="admin-loading">Loading...</p>
+        </div>
+      </section>
+
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Compliance</p>
+            <h2>Level Easy Wins</h2>
+            <p>The clearest first moves for reducing higher-level picking with minimal ambiguity.</p>
+          </div>
+        </div>
+        <div id="reportsLevelComplianceWrap">
+          <p class="admin-loading">Loading...</p>
+        </div>
+      </section>
+    </section>
+
+    <section class="panel-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Pick Faces</p>
+          <h2>Pick Face Suitability</h2>
+          <p>Pick faces that look weak because of level, refill burden, bin-size uncertainty, or lack of capacity.</p>
+        </div>
+      </div>
+      <div id="reportsPickFaceSuitabilityWrap">
         <p class="admin-loading">Loading...</p>
       </div>
     </section>

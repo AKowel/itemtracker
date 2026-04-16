@@ -32,6 +32,7 @@ const pickChip = doc?.getElementById("heatmapPickChip") || null;
 const occupiedMetric = doc?.getElementById("heatmapOccupiedMetric") || null;
 const pickedMetric = doc?.getElementById("heatmapPickedMetric") || null;
 const snapshotInfo = doc?.getElementById("heatmapSnapshotInfo") || null;
+const recommendationInfo = doc?.getElementById("heatmapRecommendationInfo") || null;
 const detailCard = doc?.getElementById("heatmapDetailCard") || null;
 const detailHint = doc?.getElementById("heatmapDetailHint") || null;
 const hotAislesWrap = doc?.getElementById("heatmapHotAisles") || null;
@@ -41,6 +42,18 @@ const legendBar = doc?.querySelector(".heatmap-legend__bar") || null;
 const legendLabels = Array.from(doc?.querySelectorAll(".heatmap-legend__labels span") || []);
 const fpsOverlay = doc?.getElementById("heatmapFpsOverlay") || null;
 const fpsModeChip = doc?.getElementById("heatmapFpsModeChip") || null;
+const playbackPrevButton = doc?.getElementById("heatmapPlaybackPrevButton") || null;
+const playbackToggleButton = doc?.getElementById("heatmapPlaybackToggleButton") || null;
+const playbackNextButton = doc?.getElementById("heatmapPlaybackNextButton") || null;
+const playbackResetButton = doc?.getElementById("heatmapPlaybackResetButton") || null;
+const playbackSpeedSelect = doc?.getElementById("heatmapPlaybackSpeedSelect") || null;
+const playbackStatusChip = doc?.getElementById("heatmapPlaybackStatusChip") || null;
+const timelineRange = doc?.getElementById("heatmapTimelineRange") || null;
+const timelineLabel = doc?.getElementById("heatmapTimelineLabel") || null;
+const timelineMeta = doc?.getElementById("heatmapTimelineMeta") || null;
+const timelineStartLabel = doc?.getElementById("heatmapTimelineStartLabel") || null;
+const timelineCurrentLabel = doc?.getElementById("heatmapTimelineCurrentLabel") || null;
+const timelineEndLabel = doc?.getElementById("heatmapTimelineEndLabel") || null;
 const clientAwareLinks = Array.from(doc?.querySelectorAll("[data-client-aware-link]") || []);
 
 function normalizeClientCode(value) {
@@ -168,7 +181,7 @@ const BAY_STEP = 2.6;
 const AISLE_HALF = 1.5;
 const SHELF_GAP = 0.03;
 const CAMERA_MODES = new Set(["orbit", "top", "fps"]);
-const COLOUR_MODES = new Set(["heatmap", "binsize", "zone", "level"]);
+const COLOUR_MODES = new Set(["heatmap", "recommendation", "prime", "binsize", "zone", "level"]);
 
 const state = {
   heatmap: null,
@@ -178,7 +191,14 @@ const state = {
   aisleCoords: new Map(),
   isFullscreen: false,
   cameraMode: CAMERA_MODES.has(cameraModeSelect?.value) ? cameraModeSelect.value : "orbit",
-  colourMode: COLOUR_MODES.has(colourModeSelect?.value) ? colourModeSelect.value : "heatmap"
+  colourMode: COLOUR_MODES.has(colourModeSelect?.value) ? colourModeSelect.value : "heatmap",
+  playback: {
+    active: false,
+    playing: false,
+    index: 0,
+    speedMs: Number.parseInt(playbackSpeedSelect?.value || "1000", 10) || 1000,
+    timer: null
+  }
 };
 
 const sceneState = {
@@ -203,6 +223,7 @@ const sceneState = {
   fpsPitch: 0,
   fpsEditMode: false
 };
+const skuDetailCache = new Map();
 
 function escapeHtml(value) {
   return String(value || "")
@@ -255,6 +276,30 @@ function normalizeCameraMode(value) {
 
 function normalizeColourMode(value) {
   return COLOUR_MODES.has(value) ? value : "heatmap";
+}
+
+function getTimelineFrames() {
+  return Array.isArray(state.heatmap?.timeline) ? state.heatmap.timeline : [];
+}
+
+function getActiveTimelineFrame() {
+  if (!state.playback.active) {
+    return null;
+  }
+  const frames = getTimelineFrames();
+  if (!frames.length) {
+    return null;
+  }
+  const index = clamp(state.playback.index, 0, Math.max(frames.length - 1, 0));
+  return frames[index] || null;
+}
+
+function getActiveSourceRows() {
+  const activeFrame = getActiveTimelineFrame();
+  if (Array.isArray(activeFrame?.rows)) {
+    return activeFrame.rows;
+  }
+  return Array.isArray(state.heatmap?.rows) ? state.heatmap.rows : [];
 }
 
 function getLevelNumber(row) {
@@ -384,6 +429,8 @@ function buildColourContext(sceneRows, overrides) {
   const levelValues = sceneRows.map((row) => row._levelValue);
   return {
     maxMetric: sceneRows.reduce((max, row) => Math.max(max, metricValue(row, metricSelect?.value || "pick_count")), 0),
+    maxRecommendationScore: sceneRows.reduce((max, row) => Math.max(max, Number(row.recommendation_score || 0)), 0),
+    maxPrimeScore: sceneRows.reduce((max, row) => Math.max(max, Number(row.prime_space_score || 0)), 0),
     binSizeColors: buildCategoryColorMap(allRows.map((row) =>
       String(locationOverrides[row.location]?.bin_size_override || row.bin_size || "").trim().toUpperCase()
     )),
@@ -393,7 +440,52 @@ function buildColourContext(sceneRows, overrides) {
   };
 }
 
+function recommendationColor(row, colourContext) {
+  const bucket = String(row.recommendation_bucket || "neutral").trim().toLowerCase();
+  const scoreRatio = clamp(Number(row.recommendation_score || 0) / Math.max(1, colourContext.maxRecommendationScore || 1), 0, 1);
+  if (bucket === "pick_face_issue") {
+    return new THREE.Color().setHSL(0.92, 0.84, 0.46 + scoreRatio * 0.12);
+  }
+  if (bucket === "move_lower") {
+    return new THREE.Color().setHSL(0.04, 0.82, 0.48 + scoreRatio * 0.1);
+  }
+  if (bucket === "bulk_to_pick") {
+    return new THREE.Color().setHSL(0.12, 0.84, 0.5 + scoreRatio * 0.08);
+  }
+  if (bucket === "well_slotted") {
+    return new THREE.Color().setHSL(0.39, 0.62, 0.44 + scoreRatio * 0.12);
+  }
+  return new THREE.Color(row.sku ? "#4a6075" : "#273341");
+}
+
+function primeSpaceColor(row, colourContext) {
+  const bucket = String(row.prime_space_bucket || "standard").trim().toLowerCase();
+  const scoreRatio = clamp(Number(row.prime_space_score || 0) / Math.max(1, colourContext.maxPrimeScore || 1), 0, 1);
+  if (bucket === "deserves_prime") {
+    return new THREE.Color().setHSL(0.02, 0.82, 0.48 + scoreRatio * 0.08);
+  }
+  if (bucket === "underused_prime") {
+    return new THREE.Color().setHSL(0.83, 0.78, 0.48 + scoreRatio * 0.08);
+  }
+  if (bucket === "empty_prime") {
+    return new THREE.Color().setHSL(0.55, 0.72, 0.54 + scoreRatio * 0.08);
+  }
+  if (bucket === "well_used_prime") {
+    return new THREE.Color().setHSL(0.34, 0.62, 0.44 + scoreRatio * 0.12);
+  }
+  if (bucket === "standard_prime") {
+    return new THREE.Color().setHSL(0.14, 0.62, 0.5 + scoreRatio * 0.06);
+  }
+  return new THREE.Color(row.sku ? "#4a6075" : "#273341");
+}
+
 function getSceneColor(row, colourContext) {
+  if (state.colourMode === "recommendation") {
+    return recommendationColor(row, colourContext);
+  }
+  if (state.colourMode === "prime") {
+    return primeSpaceColor(row, colourContext);
+  }
   if (state.colourMode === "binsize") {
     return colourContext.binSizeColors.get(row._effectiveBinSize) || new THREE.Color("#4f6b85");
   }
@@ -435,6 +527,20 @@ function clearGroup(group) {
 function updateLegend() {
   if (!legend || !legendBar || legendLabels.length < 3) return;
   legend.hidden = false;
+  if (state.colourMode === "recommendation") {
+    legendBar.style.background = "linear-gradient(90deg, #42556c 0%, #2d8f76 28%, #f09a3e 64%, #cf4d7f 100%)";
+    legendLabels[0].textContent = "Stable";
+    legendLabels[1].textContent = "Review";
+    legendLabels[2].textContent = "Action";
+    return;
+  }
+  if (state.colourMode === "prime") {
+    legendBar.style.background = "linear-gradient(90deg, #42556c 0%, #56b4d8 28%, #2c9965 56%, #e04f7a 78%, #d95a3c 100%)";
+    legendLabels[0].textContent = "Open";
+    legendLabels[1].textContent = "Good Use";
+    legendLabels[2].textContent = "Needs Move";
+    return;
+  }
   if (state.colourMode === "level") {
     legendBar.style.background = "linear-gradient(90deg, #3d6fcf 0%, #56c6f0 50%, #eb5a46 100%)";
     legendLabels[0].textContent = "Low";
@@ -1272,6 +1378,7 @@ function buildScene(rows, layout, overrides) {
 
 function recolorScene() {
   updateLegend();
+  renderRecommendationInfo(state.rows || []);
   if (!sceneState.rackMesh || !state.sceneRows.length) return;
 
   const colourContext = buildColourContext(state.sceneRows, state.heatmap?.overrides || {});
@@ -1282,7 +1389,6 @@ function recolorScene() {
   if (sceneState.rackMesh.instanceColor) {
     sceneState.rackMesh.instanceColor.needsUpdate = true;
   }
-
   updateSelectionBox();
 }
 
@@ -1356,14 +1462,15 @@ function fitCamera() {
 }
 
 function getFilteredRows() {
-  if (!state.heatmap?.rows) return [];
+  const sourceRows = getActiveSourceRows();
+  if (!sourceRows.length) return [];
 
   const query = String(searchInput?.value || "").trim().toUpperCase();
   const pickedOnly = Boolean(pickedOnlyToggle?.checked);
   const occupiedOnly = Boolean(occupiedOnlyToggle?.checked);
   const { min, max } = getLevelBounds();
 
-  return state.heatmap.rows.filter((row) => {
+  return sourceRows.filter((row) => {
     const levelNumber = getLevelNumber(row);
 
     if (min != null && levelNumber < min) return false;
@@ -1398,7 +1505,11 @@ function renderHotAisles(rows) {
   });
 
   const hottest = Array.from(byAisle.values())
-    .sort((a, b) => (b.pick_count - a.pick_count) || (b.pick_qty - a.pick_qty))
+    .sort((a, b) => (
+      (metricSelect?.value === "pick_qty" ? Number(b.pick_qty || 0) - Number(a.pick_qty || 0) : Number(b.pick_count || 0) - Number(a.pick_count || 0)) ||
+      (b.pick_count - a.pick_count) ||
+      (b.pick_qty - a.pick_qty)
+    ))
     .slice(0, 8);
 
   if (!hottest.length) {
@@ -1458,10 +1569,71 @@ function renderSnapshotInfo(meta = {}) {
   ].filter(Boolean).join("");
 }
 
+function renderRecommendationInfo(rows) {
+  if (!recommendationInfo) return;
+  const meta = state.heatmap?.meta || {};
+  const activeFrame = getActiveTimelineFrame();
+  const playbackNote = activeFrame
+    ? `<span>Playback is showing ${escapeHtml(activeFrame.snapshot_date || "one loaded day")}, while recommendation scores still use the selected full range.</span>`
+    : "";
+
+  if (state.colourMode === "recommendation") {
+    const summary = rows.reduce((acc, row) => {
+      const bucket = String(row.recommendation_bucket || "neutral").trim().toLowerCase();
+      if (bucket === "move_lower") acc.moveLower += 1;
+      if (bucket === "bulk_to_pick") acc.bulkToPick += 1;
+      if (bucket === "pick_face_issue") acc.pickFace += 1;
+      if (bucket === "well_slotted") acc.wellSlotted += 1;
+      return acc;
+    }, { moveLower: 0, bulkToPick: 0, pickFace: 0, wellSlotted: 0 });
+
+    recommendationInfo.innerHTML = [
+      "<strong>Recommendation layer</strong>",
+      `<span>${summary.moveLower.toLocaleString()} location(s) are tied to move-lower candidates.</span>`,
+      `<span>${summary.bulkToPick.toLocaleString()} location(s) are leaning on bulk-to-pick fixes.</span>`,
+      `<span>${summary.pickFace.toLocaleString()} location(s) have pick-face suitability issues.</span>`,
+      `<span>${summary.wellSlotted.toLocaleString()} fast-mover location(s) already look well slotted.</span>`,
+      meta.recommendation_note ? `<span>${escapeHtml(meta.recommendation_note)}</span>` : "",
+      playbackNote
+    ].filter(Boolean).join("");
+    return;
+  }
+
+  if (state.colourMode === "prime") {
+    const summary = rows.reduce((acc, row) => {
+      const bucket = String(row.prime_space_bucket || "standard").trim().toLowerCase();
+      if (bucket === "empty_prime") acc.open += 1;
+      if (bucket === "well_used_prime") acc.goodUse += 1;
+      if (bucket === "underused_prime") acc.wasted += 1;
+      if (bucket === "deserves_prime") acc.shouldMove += 1;
+      return acc;
+    }, { open: 0, goodUse: 0, wasted: 0, shouldMove: 0 });
+
+    recommendationInfo.innerHTML = [
+      `<strong>Prime space view</strong>`,
+      `<span>${summary.open.toLocaleString()} low-level prime slot(s) are open.</span>`,
+      `<span>${summary.goodUse.toLocaleString()} prime slot(s) are already serving fast movers well.</span>`,
+      `<span>${summary.wasted.toLocaleString()} prime slot(s) look underused or tied up by slow movers.</span>`,
+      `<span>${summary.shouldMove.toLocaleString()} higher-level location(s) belong to SKUs that should move lower.</span>`,
+      `<span>Prime space is currently treated as levels 1 to ${Number(meta.prime_space_level_threshold || 3).toLocaleString()}.</span>`,
+      playbackNote
+    ].filter(Boolean).join("");
+    return;
+  }
+
+  recommendationInfo.innerHTML = [
+    "<strong>Decision lenses ready</strong>",
+    "<span>Switch Colour mode to Recommendation layer to see move-lower, bulk-to-pick, and pick-face actions.</span>",
+    `<span>Switch to Prime space view to find wasted low-level space and SKUs that deserve moving lower.</span>`,
+    activeFrame ? `<span>Playback frame: ${escapeHtml(activeFrame.snapshot_date || "Loaded day")}.</span>` : ""
+  ].filter(Boolean).join("");
+}
+
 function renderStats(rows) {
   if (!occupiedMetric || !pickedMetric || !locationChip || !pickChip || !dateChip) return;
 
   const meta = state.heatmap?.meta || {};
+  const activeFrame = getActiveTimelineFrame();
   const occupied = rows.filter((row) => row.sku).length;
   const picked = rows.filter((row) => Number(row.pick_count || 0) > 0 || Number(row.pick_qty || 0) > 0).length;
   const picks = rows.reduce((sum, row) => sum + Number(row.pick_count || 0), 0);
@@ -1478,7 +1650,9 @@ function renderStats(rows) {
   locationChip.textContent = `${rows.length.toLocaleString()} locations`;
   pickChip.textContent = `${picks.toLocaleString()} picks`;
 
-  if (!availableDates.length) {
+  if (activeFrame?.snapshot_date) {
+    dateChip.textContent = `Playback ${activeFrame.snapshot_date}`;
+  } else if (!availableDates.length) {
     dateChip.textContent = "No pick snapshots yet";
   } else if (rangeMode !== "latest" && requestedStart && requestedEnd) {
     dateChip.textContent =
@@ -1492,7 +1666,11 @@ function renderStats(rows) {
   }
 
   if (snapshotStatusChip) {
-    if (!availableDates.length) {
+    if (activeFrame) {
+      const frames = getTimelineFrames();
+      snapshotStatusChip.textContent = `Playback frame ${Math.min(state.playback.index + 1, frames.length).toLocaleString()}/${frames.length.toLocaleString()}`;
+      snapshotStatusChip.classList.remove("chip--inactive");
+    } else if (!availableDates.length) {
       snapshotStatusChip.textContent = "Waiting for snapshots";
       snapshotStatusChip.classList.add("chip--inactive");
     } else if (missingDates.length) {
@@ -1508,6 +1686,7 @@ function renderStats(rows) {
   }
 
   renderSnapshotInfo(meta);
+  renderRecommendationInfo(rows);
   renderHotAisles(rows);
 }
 
@@ -1528,8 +1707,14 @@ async function renderSelection(row) {
   let skuDetail = null;
   if (row.sku) {
     try {
-      const data = await apiFetch(`/api/catalog/sku/${encodeURIComponent(row.sku)}`);
-      skuDetail = data.sku || null;
+      const cacheKey = `${getSelectedClient()}::${String(row.sku).trim().toUpperCase()}`;
+      if (skuDetailCache.has(cacheKey)) {
+        skuDetail = skuDetailCache.get(cacheKey) || null;
+      } else {
+        const data = await apiFetch(`/api/catalog/sku/${encodeURIComponent(row.sku)}`);
+        skuDetail = data.sku || null;
+        skuDetailCache.set(cacheKey, skuDetail);
+      }
     } catch (_) {
       skuDetail = null;
     }
@@ -1542,6 +1727,12 @@ async function renderSelection(row) {
   const currentSkuLink = row.sku
     ? `<a class="ghost-button" href="/sku/${encodeURIComponent(row.sku)}">Open SKU</a>`
     : "";
+  const recommendationChips = [
+    row.abc_class ? `<span class="chip chip--inactive">ABC ${escapeHtml(row.abc_class)}</span>` : "",
+    row.recommendation_label ? `<span class="chip chip--inactive">${escapeHtml(row.recommendation_label)}</span>` : "",
+    row.prime_space_label ? `<span class="chip chip--inactive">${escapeHtml(row.prime_space_label)}</span>` : "",
+    row.bin_type ? `<span class="chip chip--inactive">${escapeHtml(row.bin_type)} bin</span>` : ""
+  ].filter(Boolean).join("");
   const topSkuHtml = Array.isArray(row.top_skus) && row.top_skus.length
     ? `<div class="heatmap-top-skus">${row.top_skus.map((item) => `<span class="chip chip--inactive">${escapeHtml(item.sku)} - ${Number(item.pick_count || 0)} picks</span>`).join("")}</div>`
     : '<p class="heatmap-detail-muted">No picked SKU activity recorded for this location in the selected view.</p>';
@@ -1559,6 +1750,8 @@ async function renderSelection(row) {
       <div><span>Bay</span><strong>${escapeHtml(row.bay || "-")}</strong></div>
       <div><span>Level</span><strong>${escapeHtml(row.level || "-")}</strong></div>
       <div><span>Slot</span><strong>${escapeHtml(row.slot || "-")}</strong></div>
+      <div><span>Bin type</span><strong>${escapeHtml(row.bin_type || "-")}</strong></div>
+      <div><span>Max bin qty</span><strong>${Number(row.max_bin_qty || 0).toLocaleString()}</strong></div>
       <div><span>Pick count</span><strong>${Number(row.pick_count || 0).toLocaleString()}</strong></div>
       <div><span>Pick qty</span><strong>${Number(row.pick_qty || 0).toLocaleString()}</strong></div>
     </div>
@@ -1567,6 +1760,13 @@ async function renderSelection(row) {
       <strong>${escapeHtml(row.sku || "Empty location")}</strong>
       <p>${escapeHtml(row.description || "No current SKU description available.")}</p>
       <span class="heatmap-detail-muted">Bin quantity: ${Number(row.qty || 0).toLocaleString()} - Photos: ${Number(row.image_count || 0).toLocaleString()}</span>
+    </div>
+    <div class="heatmap-detail-copy">
+      <p class="eyebrow">Recommendation Signals</p>
+      <div class="heatmap-top-skus">${recommendationChips || '<span class="chip chip--inactive">No recommendation signals</span>'}</div>
+      <span class="heatmap-detail-muted">${escapeHtml(row.recommendation_reason || "No strong recommendation reason for this location yet.")}</span>
+      <span class="heatmap-detail-muted">${escapeHtml(row.prime_space_reason || "")}</span>
+      ${row.pick_face_issue_summary ? `<span class="heatmap-detail-muted">Pick-face issue: ${escapeHtml(row.pick_face_issue_summary)}</span>` : ""}
     </div>
     <div class="heatmap-detail-copy">
       <p class="eyebrow">Top Picked SKUs In This Location</p>
@@ -1641,7 +1841,7 @@ function applyFilters({ refit = false } = {}) {
   if (state.selectedLocation && !selectedRow) {
     state.selectedLocation = "";
     renderSelection(null);
-  } else if (selectedRow && refit) {
+  } else if (selectedRow) {
     renderSelection(selectedRow);
   }
 
@@ -1724,6 +1924,7 @@ function buildHeatmapQuery() {
   params.set("client", getSelectedClient());
   const mode = String(modeSelect?.value || "latest").trim().toLowerCase() || "latest";
   params.set("mode", mode);
+  params.set("rankBy", String(metricSelect?.value || "pick_count").trim());
 
   if (mode === "date") {
     const selectedDate = String(dateSelect?.value || "").trim();
@@ -1745,13 +1946,192 @@ function buildHeatmapQuery() {
   return query ? `?${query}` : "";
 }
 
+function clearPlaybackTimer() {
+  if (state.playback.timer) {
+    window.clearTimeout(state.playback.timer);
+    state.playback.timer = null;
+  }
+}
+
+function syncPlaybackUi() {
+  const frames = getTimelineFrames();
+  const hasFrames = frames.length > 0;
+  const canStepFrames = frames.length > 1;
+  const activeFrame = getActiveTimelineFrame();
+  const firstFrame = frames[0] || null;
+  const lastFrame = frames[frames.length - 1] || null;
+  const resolvedIndex = clamp(state.playback.index, 0, Math.max(frames.length - 1, 0));
+
+  if (playbackPrevButton) playbackPrevButton.disabled = !canStepFrames;
+  if (playbackNextButton) playbackNextButton.disabled = !canStepFrames;
+  if (playbackResetButton) playbackResetButton.disabled = !state.playback.active;
+  if (playbackSpeedSelect) playbackSpeedSelect.disabled = !canStepFrames;
+  if (playbackToggleButton) {
+    playbackToggleButton.disabled = !canStepFrames;
+    playbackToggleButton.textContent = !state.playback.active
+      ? "Play"
+      : state.playback.playing
+        ? "Pause"
+        : "Resume";
+  }
+  if (playbackStatusChip) {
+    if (!frames.length) {
+      playbackStatusChip.textContent = "No playback frames";
+      playbackStatusChip.classList.add("chip--inactive");
+    } else if (activeFrame) {
+      playbackStatusChip.textContent = `${activeFrame.snapshot_date || "Frame"} (${Math.min(state.playback.index + 1, frames.length)}/${frames.length})`;
+      playbackStatusChip.classList.remove("chip--inactive");
+    } else {
+      playbackStatusChip.textContent = "Aggregate view";
+      playbackStatusChip.classList.add("chip--inactive");
+    }
+  }
+  if (timelineRange) {
+    timelineRange.disabled = !hasFrames;
+    timelineRange.min = "0";
+    timelineRange.max = String(Math.max(frames.length - 1, 0));
+    timelineRange.step = "1";
+    timelineRange.value = String(resolvedIndex);
+  }
+  if (timelineLabel) {
+    timelineLabel.textContent = activeFrame?.snapshot_date
+      ? `Viewing ${activeFrame.snapshot_date}`
+      : firstFrame && lastFrame
+        ? firstFrame.snapshot_date === lastFrame.snapshot_date
+          ? `Loaded day ${firstFrame.snapshot_date}`
+          : `Aggregate ${firstFrame.snapshot_date} to ${lastFrame.snapshot_date}`
+        : "Aggregate range";
+  }
+  if (timelineMeta) {
+    if (!hasFrames) {
+      timelineMeta.textContent = "No loaded playback frames yet";
+    } else if (activeFrame) {
+      timelineMeta.textContent = `Frame ${Math.min(resolvedIndex + 1, frames.length)}/${frames.length} loaded day(s)`;
+    } else {
+      timelineMeta.textContent = `${frames.length} loaded day(s) available to scrub`;
+    }
+  }
+  if (timelineStartLabel) {
+    timelineStartLabel.textContent = firstFrame?.snapshot_date || "Start";
+  }
+  if (timelineEndLabel) {
+    timelineEndLabel.textContent = lastFrame?.snapshot_date || "End";
+  }
+  if (timelineCurrentLabel) {
+    timelineCurrentLabel.textContent = activeFrame?.snapshot_date
+      ? `Selected ${activeFrame.snapshot_date}`
+      : hasFrames
+        ? "Aggregate view"
+        : "No day selected";
+  }
+}
+
+function applyPlaybackFrame(index, { playing = false } = {}) {
+  const frames = getTimelineFrames();
+  if (!frames.length) {
+    state.playback.active = false;
+    state.playback.playing = false;
+    state.playback.index = 0;
+    syncPlaybackUi();
+    return;
+  }
+
+  state.playback.active = true;
+  state.playback.playing = playing;
+  state.playback.index = ((index % frames.length) + frames.length) % frames.length;
+  applyFilters();
+  syncPlaybackUi();
+}
+
+function schedulePlaybackStep() {
+  clearPlaybackTimer();
+  if (!state.playback.active || !state.playback.playing) {
+    return;
+  }
+  const frames = getTimelineFrames();
+  if (frames.length <= 1) {
+    state.playback.playing = false;
+    syncPlaybackUi();
+    return;
+  }
+  state.playback.timer = window.setTimeout(() => {
+    applyPlaybackFrame(state.playback.index + 1, { playing: true });
+    schedulePlaybackStep();
+  }, Math.max(400, Number(state.playback.speedMs || 1000)));
+}
+
+function resetPlaybackToAggregate() {
+  clearPlaybackTimer();
+  state.playback.active = false;
+  state.playback.playing = false;
+  applyFilters();
+  syncPlaybackUi();
+}
+
+function togglePlayback() {
+  const frames = getTimelineFrames();
+  if (frames.length <= 1) {
+    syncPlaybackUi();
+    return;
+  }
+
+  if (!state.playback.active) {
+    const requestedIndex = Number.parseInt(timelineRange?.value || String(state.playback.index || 0), 10);
+    applyPlaybackFrame(Number.isFinite(requestedIndex) ? requestedIndex : 0, { playing: true });
+    schedulePlaybackStep();
+    return;
+  }
+
+  if (state.playback.playing) {
+    state.playback.playing = false;
+    clearPlaybackTimer();
+    syncPlaybackUi();
+    return;
+  }
+
+  state.playback.playing = true;
+  syncPlaybackUi();
+  schedulePlaybackStep();
+}
+
+function stepPlayback(direction) {
+  const frames = getTimelineFrames();
+  if (!frames.length) {
+    syncPlaybackUi();
+    return;
+  }
+  clearPlaybackTimer();
+  const nextIndex = state.playback.active
+    ? state.playback.index + direction
+    : direction >= 0
+      ? 0
+      : frames.length - 1;
+  applyPlaybackFrame(nextIndex, { playing: false });
+}
+
+function scrubPlaybackToIndex(rawIndex) {
+  const frames = getTimelineFrames();
+  if (!frames.length) {
+    syncPlaybackUi();
+    return;
+  }
+  clearPlaybackTimer();
+  const nextIndex = Number.parseInt(String(rawIndex ?? ""), 10);
+  applyPlaybackFrame(Number.isFinite(nextIndex) ? nextIndex : state.playback.index, { playing: false });
+}
+
 async function loadHeatmap() {
   syncModeUi();
   setStatus("Loading heatmap...");
+  clearPlaybackTimer();
+  state.playback.active = false;
+  state.playback.playing = false;
+  state.playback.index = 0;
   try {
     const query = buildHeatmapQuery();
     const data = await apiFetch(`/api/admin/picking-heatmap${query}`);
-    state.heatmap = data.heatmap || { rows: [], layout: { zones: [] }, meta: {}, stats: {}, overrides: {}, bin_sizes: {}, known_bin_sizes: [] };
+    state.heatmap = data.heatmap || { rows: [], timeline: [], layout: { zones: [] }, meta: {}, stats: {}, overrides: {}, bin_sizes: {}, known_bin_sizes: [] };
+    state.playback.index = Math.max(getTimelineFrames().length - 1, 0);
     const meta = state.heatmap.meta || {};
     updateDateOptions(meta.available_pick_dates || [], meta.pick_snapshot_date || meta.latest_pick_snapshot_date || "");
 
@@ -1769,6 +2149,7 @@ async function loadHeatmap() {
       if (hotAislesWrap) {
         hotAislesWrap.innerHTML = '<p class="admin-empty">No pick snapshots have been published yet.</p>';
       }
+      syncPlaybackUi();
       setStatus("No pick snapshots available");
       return;
     }
@@ -1778,6 +2159,7 @@ async function loadHeatmap() {
       if (hotAislesWrap) {
         hotAislesWrap.innerHTML = '<p class="admin-empty">No pick snapshots match the selected range.</p>';
       }
+      syncPlaybackUi();
       setStatus("No snapshots in selected range");
       return;
     }
@@ -1785,10 +2167,13 @@ async function loadHeatmap() {
     if (!state.selectedLocation) {
       renderSelection(null);
     }
+    syncPlaybackUi();
   } catch (error) {
     setStatus("Could not load heatmap");
     renderSelectionPlaceholder(error.message || "Could not load the picking heatmap.");
     renderSnapshotInfo({});
+    renderRecommendationInfo([]);
+    syncPlaybackUi();
     if (hotAislesWrap) {
       hotAislesWrap.innerHTML = '<p class="admin-empty">Could not load aisle heat data.</p>';
     }
@@ -1977,7 +2362,7 @@ function wireEvents() {
     }
   });
 
-  metricSelect.addEventListener("change", recolorScene);
+  metricSelect.addEventListener("change", loadHeatmap);
   searchInput.addEventListener("input", () => applyFilters());
   pickedOnlyToggle.addEventListener("change", () => applyFilters());
   occupiedOnlyToggle.addEventListener("change", () => applyFilters());
@@ -1999,6 +2384,24 @@ function wireEvents() {
   resetCameraButton?.addEventListener("click", fitCamera);
   reloadButton.addEventListener("click", loadHeatmap);
   fullscreenButton?.addEventListener("click", toggleFullscreen);
+  playbackPrevButton?.addEventListener("click", () => stepPlayback(-1));
+  playbackToggleButton?.addEventListener("click", togglePlayback);
+  playbackNextButton?.addEventListener("click", () => stepPlayback(1));
+  playbackResetButton?.addEventListener("click", resetPlaybackToAggregate);
+  timelineRange?.addEventListener("input", () => {
+    scrubPlaybackToIndex(timelineRange.value);
+  });
+  timelineRange?.addEventListener("change", () => {
+    scrubPlaybackToIndex(timelineRange.value);
+  });
+  playbackSpeedSelect?.addEventListener("change", () => {
+    state.playback.speedMs = Number.parseInt(playbackSpeedSelect.value || "1000", 10) || 1000;
+    if (state.playback.playing) {
+      schedulePlaybackStep();
+    } else {
+      syncPlaybackUi();
+    }
+  });
 
   document.addEventListener("fullscreenchange", refreshFullscreenState);
   document.addEventListener("keydown", handleKeyDown);
@@ -2014,6 +2417,7 @@ if (canvas) {
   updateClientAwareLinks();
   syncClientUrl();
   refreshFullscreenState();
+  syncPlaybackUi();
   wireEvents();
   loadHeatmap();
 }

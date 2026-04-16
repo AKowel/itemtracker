@@ -239,6 +239,10 @@ function addWorksheetTable(workbook, sheetName, columns, rows, emptyMessage = "N
 }
 
 const HIGH_LEVEL_THRESHOLD = 10;
+const PRIME_SPACE_LEVEL_THRESHOLD = 3;
+const MOVE_LOWER_RECOMMENDATION_THRESHOLD = 35;
+const BULK_TO_PICK_RECOMMENDATION_THRESHOLD = 35;
+const PICK_FACE_RECOMMENDATION_THRESHOLD = 45;
 
 function levelNumber(value) {
   const parsed = Number.parseInt(String(value || "").trim(), 10);
@@ -285,6 +289,31 @@ function estimateReplenishments(totalPickQty, maxBinQty) {
     return 0;
   }
   return Math.max(0, Math.ceil(pickQty / capacity) - 1);
+}
+
+function safeRatio(numerator, denominator) {
+  const top = safeNumber(numerator);
+  const bottom = safeNumber(denominator);
+  if (bottom <= 0) {
+    return 0;
+  }
+  return top / bottom;
+}
+
+function clamp(value, min = 0, max = 1) {
+  const number = safeNumber(value);
+  if (number <= min) return min;
+  if (number >= max) return max;
+  return number;
+}
+
+function roundMetric(value, digits = 2) {
+  const factor = 10 ** digits;
+  return Math.round(safeNumber(value) * factor) / factor;
+}
+
+function arrayText(values = []) {
+  return Array.from(new Set((values || []).filter(Boolean))).join(", ");
 }
 
 function recordFileName(record, fieldName) {
@@ -1327,6 +1356,7 @@ class ItemTrackerService {
 
   async getPickingHeatmap(clientCode = DEFAULT_CLIENT_CODE, options = {}) {
     const targetClient = String(clientCode || DEFAULT_CLIENT_CODE).trim().toUpperCase();
+    const rankBy = String(options.rankBy || "").trim().toLowerCase() === "pick_qty" ? "pick_qty" : "pick_count";
     const [layoutManifest, layoutOverrides, warehouseState, pickRecords, catalogState, imageState] = await Promise.all([
       this.loadLayoutManifest(),
       this.getLayoutOverrides().catch(() => ({ zones: {}, aisles: {}, bays: {}, locations: {}, virtual_locations: [], bin_sizes: {} })),
@@ -1346,67 +1376,86 @@ class ItemTrackerService {
     let pickState = { snapshot: null, meta: pickActivitySnapshotMeta(null, "none") };
     let pickRows = [];
     let pickLoadedDates = [];
+    let timeline = [];
     if (range.matchedDates.length) {
       const snapshots = await Promise.all(
         range.matchedDates.map((date) => this.loadPickActivitySnapshot(date, targetClient))
       );
       const byLocation = new Map();
-      let totalPickCount = 0;
-      let totalPickQty = 0;
+
+      const mergePickRow = (targetMap, row) => {
+        const location = String(row?.location || "").trim().toUpperCase();
+        if (!location) {
+          return;
+        }
+        const existing = targetMap.get(location) || {
+          location,
+          aisle_prefix: String(row?.aisle_prefix || "").trim().toUpperCase(),
+          bay: String(row?.bay || "").trim(),
+          level: String(row?.level || "").trim(),
+          slot: String(row?.slot || "").trim(),
+          pick_count: 0,
+          pick_qty: 0,
+          picker_count: 0,
+          _topSkuMap: new Map()
+        };
+        existing.pick_count += Number(row?.pick_count || 0);
+        existing.pick_qty += safeNumber(row?.pick_qty || 0);
+        existing.picker_count = Math.max(existing.picker_count, Number(row?.picker_count || 0));
+        for (const skuRow of row?.top_skus || []) {
+          const sku = normalizeSku(skuRow?.sku);
+          if (!sku) {
+            continue;
+          }
+          const skuExisting = existing._topSkuMap.get(sku) || { sku, pick_count: 0, pick_qty: 0, picker_count: 0 };
+          skuExisting.pick_count += Number(skuRow?.pick_count || 0);
+          skuExisting.pick_qty += safeNumber(skuRow?.pick_qty || 0);
+          skuExisting.picker_count = Math.max(skuExisting.picker_count, Number(skuRow?.picker_count || 0));
+          existing._topSkuMap.set(sku, skuExisting);
+        }
+        targetMap.set(location, existing);
+      };
+
+      const finalizePickRows = (targetMap) => (
+        Array.from(targetMap.values()).map((row) => ({
+          location: row.location,
+          aisle_prefix: row.aisle_prefix,
+          bay: row.bay,
+          level: row.level,
+          slot: row.slot,
+          pick_count: row.pick_count,
+          pick_qty: row.pick_qty,
+          picker_count: row.picker_count,
+          top_skus: Array.from(row._topSkuMap.values())
+            .sort((a, b) => (b.pick_count - a.pick_count) || (b.pick_qty - a.pick_qty) || String(a.sku).localeCompare(String(b.sku)))
+            .slice(0, 5)
+        }))
+      );
+
       for (const snapshotState of snapshots) {
         const snapshot = snapshotState?.snapshot || null;
         if (!snapshot) {
           continue;
         }
-        pickLoadedDates.push(String(snapshot.snapshot_date || snapshotState?.meta?.snapshot_date || "").trim());
-        totalPickCount += Number(snapshot.total_pick_count || 0);
-        totalPickQty += safeNumber(snapshot.total_pick_qty || 0);
+        const frameDate = String(snapshot.snapshot_date || snapshotState?.meta?.snapshot_date || "").trim();
+        const frameMap = new Map();
+        pickLoadedDates.push(frameDate);
         for (const row of snapshot.rows || []) {
-          const location = String(row?.location || "").trim().toUpperCase();
-          if (!location) {
-            continue;
-          }
-          const existing = byLocation.get(location) || {
-            location,
-            aisle_prefix: String(row?.aisle_prefix || "").trim().toUpperCase(),
-            bay: String(row?.bay || "").trim(),
-            level: String(row?.level || "").trim(),
-            slot: String(row?.slot || "").trim(),
-            pick_count: 0,
-            pick_qty: 0,
-            picker_count: 0,
-            _topSkuMap: new Map()
-          };
-          existing.pick_count += Number(row?.pick_count || 0);
-          existing.pick_qty += safeNumber(row?.pick_qty || 0);
-          existing.picker_count = Math.max(existing.picker_count, Number(row?.picker_count || 0));
-          for (const skuRow of row?.top_skus || []) {
-            const sku = normalizeSku(skuRow?.sku);
-            if (!sku) {
-              continue;
-            }
-            const skuExisting = existing._topSkuMap.get(sku) || { sku, pick_count: 0, pick_qty: 0, picker_count: 0 };
-            skuExisting.pick_count += Number(skuRow?.pick_count || 0);
-            skuExisting.pick_qty += safeNumber(skuRow?.pick_qty || 0);
-            skuExisting.picker_count = Math.max(skuExisting.picker_count, Number(skuRow?.picker_count || 0));
-            existing._topSkuMap.set(sku, skuExisting);
-          }
-          byLocation.set(location, existing);
+          mergePickRow(byLocation, row);
+          mergePickRow(frameMap, row);
         }
+        const frameRows = finalizePickRows(frameMap);
+        timeline.push({
+          snapshot_date: frameDate,
+          total_pick_count: frameRows.reduce((sum, row) => sum + Number(row.pick_count || 0), 0),
+          total_pick_qty: frameRows.reduce((sum, row) => sum + safeNumber(row.pick_qty || 0), 0),
+          row_count: frameRows.length,
+          rows: frameRows
+        });
       }
-      pickRows = Array.from(byLocation.values()).map((row) => ({
-        location: row.location,
-        aisle_prefix: row.aisle_prefix,
-        bay: row.bay,
-        level: row.level,
-        slot: row.slot,
-        pick_count: row.pick_count,
-        pick_qty: row.pick_qty,
-        picker_count: row.picker_count,
-        top_skus: Array.from(row._topSkuMap.values())
-          .sort((a, b) => (b.pick_count - a.pick_count) || (b.pick_qty - a.pick_qty) || String(a.sku).localeCompare(String(b.sku)))
-          .slice(0, 5)
-      }));
+      pickRows = finalizePickRows(byLocation);
+      const totalPickCount = pickRows.reduce((sum, row) => sum + Number(row.pick_count || 0), 0);
+      const totalPickQty = pickRows.reduce((sum, row) => sum + safeNumber(row.pick_qty || 0), 0);
 
       pickState = {
         snapshot: {
@@ -1455,14 +1504,6 @@ class ItemTrackerService {
     }
 
     const imageMap = imageState.imageMap || new Map();
-    const pickMap = new Map();
-    for (const row of pickRows) {
-      const key = String(row?.location || "").trim().toUpperCase();
-      if (key) {
-        pickMap.set(key, row);
-      }
-    }
-
     const aisleOrder = Array.isArray(layoutManifest?.aisle_order) ? layoutManifest.aisle_order : [];
     const aisleIndex = new Map(aisleOrder.map((prefix, index) => [prefix, index]));
     const zoneIndex = new Map();
@@ -1472,7 +1513,30 @@ class ItemTrackerService {
       }
     }
 
-    const locationMap = new Map();
+    const buildDefaultLocationEntry = (locationCode, parts = this.parseHeatmapLocation(locationCode)) => ({
+      location: locationCode,
+      aisle_prefix: parts.aisle_prefix,
+      bay: parts.bay,
+      level: parts.level,
+      slot: parts.slot,
+      zone_key: zoneIndex.get(parts.aisle_prefix) || "",
+      aisle_index: aisleIndex.has(parts.aisle_prefix) ? aisleIndex.get(parts.aisle_prefix) : 9999,
+      sku: "",
+      description: "",
+      qty: 0,
+      status: "",
+      bin_size: "",
+      bin_type: "Unknown",
+      max_bin_qty: 0,
+      image_count: 0,
+      has_images: false,
+      pick_count: 0,
+      pick_qty: 0,
+      picker_count: 0,
+      top_skus: []
+    });
+
+    const baseLocationMap = new Map();
     for (const row of warehouseState?.snapshot?.rows || []) {
       const client = String(row?.BLCCOD || row?.Client || row?.client_code || "").trim().toUpperCase();
       if (targetClient && client && client !== targetClient) {
@@ -1490,7 +1554,7 @@ class ItemTrackerService {
       const sku = normalizeSku(row?.BLITEM || row?.["Item SKU"] || row?.sku);
       const catalogItem = catalogItems.get(sku) || null;
       const binSize = String(row?.BLSCOD || row?.["Bin Size"] || row?.bin_size || "").trim().toUpperCase();
-      locationMap.set(locationCode, {
+      baseLocationMap.set(locationCode, {
         location: locationCode,
         aisle_prefix: parts.aisle_prefix,
         bay: parts.bay,
@@ -1503,6 +1567,8 @@ class ItemTrackerService {
         qty: safeNumber(row?.BLQTY || row?.qty || 0),
         status: status || "Y",
         bin_size: binSize,
+        bin_type: warehouseBinType(row),
+        max_bin_qty: warehouseMaxBinQty(row),
         image_count: imageMap.get(sku)?.length || 0,
         has_images: imageMap.has(sku),
         pick_count: 0,
@@ -1512,44 +1578,12 @@ class ItemTrackerService {
       });
     }
 
-    for (const row of pickRows) {
-      const locationCode = String(row?.location || "").trim().toUpperCase();
-      if (!locationCode) {
-        continue;
-      }
-      const parts = this.parseHeatmapLocation(locationCode);
-      const entry =
-        locationMap.get(locationCode) ||
-        {
-          location: locationCode,
-          aisle_prefix: parts.aisle_prefix,
-          bay: parts.bay,
-          level: parts.level,
-          slot: parts.slot,
-          zone_key: zoneIndex.get(parts.aisle_prefix) || "",
-          aisle_index: aisleIndex.has(parts.aisle_prefix) ? aisleIndex.get(parts.aisle_prefix) : 9999,
-          sku: "",
-          description: "",
-          qty: 0,
-          status: "",
-          bin_size: "",
-          image_count: 0,
-          has_images: false,
-          top_skus: []
-        };
-      entry.pick_count = Number(row?.pick_count || 0);
-      entry.pick_qty = safeNumber(row?.pick_qty || 0);
-      entry.picker_count = Number(row?.picker_count || 0);
-      entry.top_skus = Array.isArray(row?.top_skus) ? row.top_skus : [];
-      locationMap.set(locationCode, entry);
-    }
-
     // Merge virtual locations (admin-defined, don't exist in warehouse snapshot)
     for (const vl of layoutOverrides.virtual_locations || []) {
       const loc = String(vl.location || "").trim().toUpperCase();
-      if (!loc || locationMap.has(loc)) continue;
+      if (!loc || baseLocationMap.has(loc)) continue;
       const parts = this.parseHeatmapLocation(loc);
-      locationMap.set(loc, {
+      baseLocationMap.set(loc, {
         location: loc,
         aisle_prefix: parts.aisle_prefix,
         bay: parts.bay,
@@ -1562,6 +1596,8 @@ class ItemTrackerService {
         qty: 0,
         status: "Y",
         bin_size: String(vl.bin_size || "").trim().toUpperCase(),
+        bin_type: normalizePickBulkType(vl.bin_type || ""),
+        max_bin_qty: safeNumber(vl.max_bin_qty || 0),
         image_count: 0,
         has_images: false,
         pick_count: 0,
@@ -1572,7 +1608,7 @@ class ItemTrackerService {
       });
     }
 
-    const rows = Array.from(locationMap.values()).sort((a, b) => {
+    const compareHeatmapRows = (a, b) => {
       if (a.aisle_index !== b.aisle_index) {
         return a.aisle_index - b.aisle_index;
       }
@@ -1582,7 +1618,205 @@ class ItemTrackerService {
         Number.parseInt(a.slot || "0", 10) - Number.parseInt(b.slot || "0", 10) ||
         String(a.location || "").localeCompare(String(b.location || ""))
       );
+    };
+
+    const buildMergedRows = (sourcePickRows = []) => {
+      const locationMap = new Map();
+      for (const [locationCode, entry] of baseLocationMap.entries()) {
+        locationMap.set(locationCode, {
+          ...entry,
+          top_skus: []
+        });
+      }
+
+      for (const row of sourcePickRows || []) {
+        const locationCode = String(row?.location || "").trim().toUpperCase();
+        if (!locationCode) {
+          continue;
+        }
+        const parts = this.parseHeatmapLocation(locationCode);
+        const entry = locationMap.get(locationCode) || buildDefaultLocationEntry(locationCode, parts);
+        entry.pick_count = Number(row?.pick_count || 0);
+        entry.pick_qty = safeNumber(row?.pick_qty || 0);
+        entry.picker_count = Number(row?.picker_count || 0);
+        entry.top_skus = Array.isArray(row?.top_skus) ? row.top_skus : [];
+        locationMap.set(locationCode, entry);
+      }
+
+      return Array.from(locationMap.values()).sort(compareHeatmapRows);
+    };
+
+    const reports = await this.getPickingReports(targetClient, {
+      mode: options.mode,
+      snapshotDate: options.snapshotDate,
+      startDate: options.startDate,
+      endDate: options.endDate,
+      rankBy,
+      limit: "250"
+    }).catch(() => null);
+
+    const abcMap = new Map();
+    for (const entry of reports?.recommendations?.abc_velocity?.skus || []) {
+      const sku = normalizeSku(entry?.sku);
+      if (sku) {
+        abcMap.set(sku, entry);
+      }
+    }
+    const moveLowerMap = new Map();
+    for (const entry of reports?.recommendations?.slotting?.move_lower || []) {
+      const sku = normalizeSku(entry?.sku);
+      if (sku) {
+        moveLowerMap.set(sku, entry);
+      }
+    }
+    const bulkToPickMap = new Map();
+    for (const entry of reports?.recommendations?.slotting?.move_to_pick_bin || []) {
+      const sku = normalizeSku(entry?.sku);
+      if (sku) {
+        bulkToPickMap.set(sku, entry);
+      }
+    }
+    const easyWinSkuSet = new Set(
+      (reports?.recommendations?.level_compliance?.easy_wins || [])
+        .map((entry) => normalizeSku(entry?.sku))
+        .filter(Boolean)
+    );
+    const pickFaceExactMap = new Map();
+    const pickFaceLocationMap = new Map();
+    for (const entry of reports?.recommendations?.pick_face_suitability || []) {
+      const location = String(entry?.location || "").trim().toUpperCase();
+      const sku = normalizeSku(entry?.sku);
+      const exactKey = location && sku ? `${location}::${sku}` : "";
+      if (exactKey) {
+        const current = pickFaceExactMap.get(exactKey);
+        if (!current || safeNumber(entry?.suitability_score || 0) > safeNumber(current?.suitability_score || 0)) {
+          pickFaceExactMap.set(exactKey, entry);
+        }
+      }
+      if (location) {
+        const current = pickFaceLocationMap.get(location);
+        if (!current || safeNumber(entry?.suitability_score || 0) > safeNumber(current?.suitability_score || 0)) {
+          pickFaceLocationMap.set(location, entry);
+        }
+      }
+    }
+
+    const annotateRows = (sourceRows = []) => sourceRows.map((row) => {
+      const sku = normalizeSku(row?.sku);
+      const locationCode = String(row?.location || "").trim().toUpperCase();
+      const abcEntry = sku ? abcMap.get(sku) || null : null;
+      const moveLowerEntry = sku ? moveLowerMap.get(sku) || null : null;
+      const bulkToPickEntry = sku ? bulkToPickMap.get(sku) || null : null;
+      const pickFaceEntry = pickFaceExactMap.get(`${locationCode}::${sku}`) || pickFaceLocationMap.get(locationCode) || null;
+      const levelNum = levelNumber(row?.level);
+      const isPrimeLevel = levelNum > 0 && levelNum <= PRIME_SPACE_LEVEL_THRESHOLD;
+      const abcClass = String(abcEntry?.abc_class || "").trim().toUpperCase();
+      const moveLowerScore = safeNumber(moveLowerEntry?.move_lower_score || 0);
+      const bulkToPickScore = safeNumber(bulkToPickEntry?.move_to_pick_bin_score || 0);
+      const pickFaceScore = safeNumber(pickFaceEntry?.suitability_score || 0);
+      const levelEasyWin = sku ? easyWinSkuSet.has(sku) : false;
+      const binType = normalizePickBulkType(row?.bin_type);
+
+      let recommendationBucket = "neutral";
+      let recommendationLabel = "Stable";
+      let recommendationReason = "No strong slotting signal for this location in the selected range.";
+
+      if (pickFaceScore >= PICK_FACE_RECOMMENDATION_THRESHOLD) {
+        recommendationBucket = "pick_face_issue";
+        recommendationLabel = "Pick-face issue";
+        recommendationReason = String(pickFaceEntry?.issue_summary || pickFaceEntry?.issues || "Capacity or face suitability needs review.");
+      } else if ((moveLowerScore >= MOVE_LOWER_RECOMMENDATION_THRESHOLD || levelEasyWin) && levelNum >= HIGH_LEVEL_THRESHOLD) {
+        recommendationBucket = "move_lower";
+        recommendationLabel = levelEasyWin ? "Easy win" : "Move lower";
+        recommendationReason = String(
+          moveLowerEntry?.recommendation_reason ||
+          moveLowerEntry?.suggested_action ||
+          `High-velocity SKU is still being worked above level ${HIGH_LEVEL_THRESHOLD - 1}.`
+        );
+      } else if (bulkToPickScore >= BULK_TO_PICK_RECOMMENDATION_THRESHOLD && (binType === "Bulk" || binType === "Unknown")) {
+        recommendationBucket = "bulk_to_pick";
+        recommendationLabel = "Bulk to pick";
+        recommendationReason = String(
+          bulkToPickEntry?.recommendation_reason ||
+          bulkToPickEntry?.suggested_action ||
+          "Demand is still leaning on bulk bins instead of a stronger pick face."
+        );
+      } else if (isPrimeLevel && binType === "Pick" && (abcClass === "A" || abcClass === "B")) {
+        recommendationBucket = "well_slotted";
+        recommendationLabel = "Well slotted";
+        recommendationReason = "Fast-moving SKU is already sitting in low-level pick space.";
+      }
+
+      let primeSpaceBucket = "standard";
+      let primeSpaceLabel = "Standard space";
+      let primeSpaceReason = "This location is outside the main low-level prime space band.";
+      let primeSpaceScore = 24;
+
+      if (isPrimeLevel) {
+        if (!sku) {
+          primeSpaceBucket = "empty_prime";
+          primeSpaceLabel = "Open prime slot";
+          primeSpaceReason = "Low-level prime space is currently free.";
+          primeSpaceScore = 58;
+        } else if (abcClass === "A" || (abcClass === "B" && binType === "Pick")) {
+          primeSpaceBucket = "well_used_prime";
+          primeSpaceLabel = "Prime space well used";
+          primeSpaceReason = "Fast-moving SKU is already sitting in the low-level zone.";
+          primeSpaceScore = 84;
+        } else if (abcClass === "C" || (!abcClass && Number(row?.pick_count || 0) <= 0)) {
+          primeSpaceBucket = "underused_prime";
+          primeSpaceLabel = "Prime space underused";
+          primeSpaceReason = "Slow or inactive SKU is occupying low-level prime space.";
+          primeSpaceScore = 96;
+        } else {
+          primeSpaceBucket = "standard_prime";
+          primeSpaceLabel = "Prime space in use";
+          primeSpaceReason = "This low-level location is occupied, but it is not the clearest win or waste.";
+          primeSpaceScore = 68;
+        }
+      } else if ((moveLowerScore >= MOVE_LOWER_RECOMMENDATION_THRESHOLD || levelEasyWin) && sku) {
+        primeSpaceBucket = "deserves_prime";
+        primeSpaceLabel = "Should move lower";
+        primeSpaceReason = String(
+          moveLowerEntry?.suggested_action ||
+          moveLowerEntry?.recommendation_reason ||
+          "This SKU is doing enough high-level work to justify lower placement."
+        );
+        primeSpaceScore = 100;
+      }
+
+      return {
+        ...row,
+        bin_type: binType,
+        max_bin_qty: safeNumber(row?.max_bin_qty || 0),
+        abc_class: abcClass,
+        level_number: levelNum,
+        level_easy_win: levelEasyWin,
+        move_lower_score: roundMetric(moveLowerScore, 1),
+        move_to_pick_bin_score: roundMetric(bulkToPickScore, 1),
+        pick_face_suitability_score: roundMetric(pickFaceScore, 1),
+        pick_face_issue_summary: String(pickFaceEntry?.issue_summary || ""),
+        recommendation_bucket: recommendationBucket,
+        recommendation_label: recommendationLabel,
+        recommendation_reason: recommendationReason,
+        recommendation_score: roundMetric(Math.max(moveLowerScore, bulkToPickScore, pickFaceScore), 1),
+        recommendation_action: String(
+          moveLowerEntry?.suggested_action ||
+          bulkToPickEntry?.suggested_action ||
+          recommendationReason
+        ),
+        prime_space_bucket: primeSpaceBucket,
+        prime_space_label: primeSpaceLabel,
+        prime_space_reason: primeSpaceReason,
+        prime_space_score: roundMetric(primeSpaceScore, 1)
+      };
     });
+
+    const rows = annotateRows(buildMergedRows(pickRows));
+    timeline = timeline.map((frame) => ({
+      ...frame,
+      rows: annotateRows(buildMergedRows(frame.rows || []))
+    }));
 
     // Collect all known bin size codes from data
     const knownBinSizes = new Set();
@@ -1595,6 +1829,18 @@ class ItemTrackerService {
     let pickedCount = 0;
     let totalPickCount = 0;
     let totalPickQty = 0;
+    const recommendationSummary = {
+      move_lower_locations: 0,
+      bulk_to_pick_locations: 0,
+      pick_face_issue_locations: 0,
+      well_slotted_locations: 0
+    };
+    const primeSpaceSummary = {
+      empty_prime_locations: 0,
+      well_used_prime_locations: 0,
+      underused_prime_locations: 0,
+      deserves_prime_locations: 0
+    };
     for (const row of rows) {
       if (row.sku) {
         occupiedCount += 1;
@@ -1610,6 +1856,26 @@ class ItemTrackerService {
       summary.pick_qty += safeNumber(row.pick_qty || 0);
       summary.location_count += 1;
       hottestByAisle.set(aisle, summary);
+
+      if (row.recommendation_bucket === "move_lower") {
+        recommendationSummary.move_lower_locations += 1;
+      } else if (row.recommendation_bucket === "bulk_to_pick") {
+        recommendationSummary.bulk_to_pick_locations += 1;
+      } else if (row.recommendation_bucket === "pick_face_issue") {
+        recommendationSummary.pick_face_issue_locations += 1;
+      } else if (row.recommendation_bucket === "well_slotted") {
+        recommendationSummary.well_slotted_locations += 1;
+      }
+
+      if (row.prime_space_bucket === "empty_prime") {
+        primeSpaceSummary.empty_prime_locations += 1;
+      } else if (row.prime_space_bucket === "well_used_prime") {
+        primeSpaceSummary.well_used_prime_locations += 1;
+      } else if (row.prime_space_bucket === "underused_prime") {
+        primeSpaceSummary.underused_prime_locations += 1;
+      } else if (row.prime_space_bucket === "deserves_prime") {
+        primeSpaceSummary.deserves_prime_locations += 1;
+      }
     }
 
     return {
@@ -1620,6 +1886,7 @@ class ItemTrackerService {
       rows,
       meta: {
         client_code: targetClient,
+        rank_metric: rankBy,
         warehouse_snapshot_date: warehouseState?.meta?.snapshot_date || "",
         pick_snapshot_date: pickState?.meta?.snapshot_date || "",
         available_pick_dates: range.availableDates,
@@ -1632,7 +1899,15 @@ class ItemTrackerService {
         pick_missing_dates: range.missingDates,
         latest_pick_snapshot_date: range.latestAvailableDate,
         pick_snapshot_meta: pickState?.meta || pickActivitySnapshotMeta(null, "none"),
-        item_catalog_meta: catalogState?.meta || this.snapshotMeta(null, "none")
+        item_catalog_meta: catalogState?.meta || this.snapshotMeta(null, "none"),
+        recommendation_note: reports?.meta?.recommendation_note || "",
+        high_level_threshold: HIGH_LEVEL_THRESHOLD,
+        prime_space_level_threshold: PRIME_SPACE_LEVEL_THRESHOLD,
+        recommendation_thresholds: {
+          move_lower: MOVE_LOWER_RECOMMENDATION_THRESHOLD,
+          bulk_to_pick: BULK_TO_PICK_RECOMMENDATION_THRESHOLD,
+          pick_face_issue: PICK_FACE_RECOMMENDATION_THRESHOLD
+        }
       },
       stats: {
         location_count: rows.length,
@@ -1640,10 +1915,18 @@ class ItemTrackerService {
         picked_location_count: pickedCount,
         total_pick_count: totalPickCount,
         total_pick_qty: totalPickQty,
+        playback_frame_count: timeline.length,
+        recommendation_summary: recommendationSummary,
+        prime_space_summary: primeSpaceSummary,
         hottest_aisles: Array.from(hottestByAisle.values())
-          .sort((a, b) => (b.pick_count - a.pick_count) || (b.pick_qty - a.pick_qty))
+          .sort((a, b) => (
+            (rankBy === "pick_qty" ? safeNumber(b.pick_qty || 0) - safeNumber(a.pick_qty || 0) : Number(b.pick_count || 0) - Number(a.pick_count || 0)) ||
+            (b.pick_count - a.pick_count) ||
+            (b.pick_qty - a.pick_qty)
+          ))
           .slice(0, 8)
-      }
+      },
+      timeline
     };
   }
 
@@ -1718,6 +2001,7 @@ class ItemTrackerService {
     const binTypeMap = new Map();
     const binSizeMap = new Map();
     const skuLevelMap = new Map();
+    const skuRecommendationMap = new Map();
     const replenishmentMap = new Map();
     const pickLoadedDates = [];
     let totalPickCount = 0;
@@ -2005,6 +2289,76 @@ class ItemTrackerService {
             }
             skuLevelMap.set(sku, skuLevelEntry);
 
+            const skuRecommendationEntry = skuRecommendationMap.get(sku) || {
+              label: sku,
+              sku,
+              description: catalogItem?.description || catalogItem?.description_short || "",
+              pick_count: 0,
+              pick_qty: 0,
+              high_level_pick_count: 0,
+              high_level_pick_qty: 0,
+              low_level_pick_count: 0,
+              low_level_pick_qty: 0,
+              pick_bin_pick_count: 0,
+              pick_bin_pick_qty: 0,
+              bulk_bin_pick_count: 0,
+              bulk_bin_pick_qty: 0,
+              unknown_bin_type_pick_count: 0,
+              unknown_bin_type_pick_qty: 0,
+              min_level: levelNum || 0,
+              max_level: levelNum || 0,
+              _daySet: new Set(),
+              _locationSet: new Set(),
+              _aisleSet: new Set(),
+              _levelSet: new Set(),
+              _binTypeSet: new Set(),
+              _binSizeSet: new Set()
+            };
+            skuRecommendationEntry.pick_count += Number(skuRow?.pick_count || 0);
+            skuRecommendationEntry.pick_qty += safeNumber(skuRow?.pick_qty || 0);
+            if (snapshotDate) {
+              skuRecommendationEntry._daySet.add(snapshotDate);
+            }
+            if (location) {
+              skuRecommendationEntry._locationSet.add(location);
+            }
+            if (aislePrefix) {
+              skuRecommendationEntry._aisleSet.add(aislePrefix);
+            }
+            if (levelText) {
+              skuRecommendationEntry._levelSet.add(levelText);
+            }
+            if (binTypeKey) {
+              skuRecommendationEntry._binTypeSet.add(binTypeKey);
+            }
+            if (binSizeKey) {
+              skuRecommendationEntry._binSizeSet.add(binSizeKey);
+            }
+            if (levelNum > 0) {
+              skuRecommendationEntry.min_level = skuRecommendationEntry.min_level > 0
+                ? Math.min(skuRecommendationEntry.min_level, levelNum)
+                : levelNum;
+              skuRecommendationEntry.max_level = Math.max(skuRecommendationEntry.max_level || 0, levelNum);
+            }
+            if (levelNum >= HIGH_LEVEL_THRESHOLD) {
+              skuRecommendationEntry.high_level_pick_count += Number(skuRow?.pick_count || 0);
+              skuRecommendationEntry.high_level_pick_qty += safeNumber(skuRow?.pick_qty || 0);
+            } else {
+              skuRecommendationEntry.low_level_pick_count += Number(skuRow?.pick_count || 0);
+              skuRecommendationEntry.low_level_pick_qty += safeNumber(skuRow?.pick_qty || 0);
+            }
+            if (binType === "Pick") {
+              skuRecommendationEntry.pick_bin_pick_count += Number(skuRow?.pick_count || 0);
+              skuRecommendationEntry.pick_bin_pick_qty += safeNumber(skuRow?.pick_qty || 0);
+            } else if (binType === "Bulk") {
+              skuRecommendationEntry.bulk_bin_pick_count += Number(skuRow?.pick_count || 0);
+              skuRecommendationEntry.bulk_bin_pick_qty += safeNumber(skuRow?.pick_qty || 0);
+            } else {
+              skuRecommendationEntry.unknown_bin_type_pick_count += Number(skuRow?.pick_count || 0);
+              skuRecommendationEntry.unknown_bin_type_pick_qty += safeNumber(skuRow?.pick_qty || 0);
+            }
+            skuRecommendationMap.set(sku, skuRecommendationEntry);
+
             if (binType === "Pick" && warehouseProfile?.sku && warehouseProfile.sku === sku) {
               const replenishmentKey = `${location}::${sku}`;
               const replenishmentEntry = replenishmentMap.get(replenishmentKey) || {
@@ -2014,6 +2368,7 @@ class ItemTrackerService {
                 description: catalogItem?.description || catalogItem?.description_short || "",
                 aisle_prefix: aislePrefix,
                 level: levelText,
+                level_number: levelNum,
                 slot: slotText,
                 bin_size: binSize,
                 max_bin_qty: maxBinQty,
@@ -2200,6 +2555,7 @@ class ItemTrackerService {
         description: entry.description,
         aisle_prefix: entry.aisle_prefix,
         level: entry.level,
+        level_number: entry.level_number || levelNumber(entry.level),
         slot: entry.slot,
         bin_size: entry.bin_size,
         max_bin_qty: entry.max_bin_qty,
@@ -2230,6 +2586,369 @@ class ItemTrackerService {
     const replenishmentNote = warehouseSupportsMaxBinQty
       ? "Replenishment estimates are based on current pick-bin locations where the current warehouse SKU still matches the picked SKU and Max. Bin Qty is available."
       : "The current warehouse snapshot does not include Max. Bin Qty yet, so replenishment rows will show as missing until PI-App republishes the warehouse snapshot with BLMAXQ.";
+    const sortedTopSkus = sortPickReportRows(topSkus, rankBy, "sku");
+    const sortedTopLocations = sortPickReportRows(topLocations, rankBy, "location");
+    const sortedTopAisles = sortPickReportRows(topAisles, rankBy, "aisle_prefix");
+
+    const skuRecommendationRows = Array.from(skuRecommendationMap.values()).map((entry) => ({
+      sku: entry.sku,
+      label: entry.label,
+      description: entry.description,
+      pick_count: entry.pick_count,
+      pick_qty: entry.pick_qty,
+      high_level_pick_count: entry.high_level_pick_count,
+      high_level_pick_qty: entry.high_level_pick_qty,
+      low_level_pick_count: entry.low_level_pick_count,
+      low_level_pick_qty: entry.low_level_pick_qty,
+      pick_bin_pick_count: entry.pick_bin_pick_count,
+      pick_bin_pick_qty: entry.pick_bin_pick_qty,
+      bulk_bin_pick_count: entry.bulk_bin_pick_count,
+      bulk_bin_pick_qty: entry.bulk_bin_pick_qty,
+      unknown_bin_type_pick_count: entry.unknown_bin_type_pick_count,
+      unknown_bin_type_pick_qty: entry.unknown_bin_type_pick_qty,
+      day_count: entry._daySet.size,
+      location_count: entry._locationSet.size,
+      aisle_count: entry._aisleSet.size,
+      level_count: entry._levelSet.size,
+      lowest_level: entry.min_level || 0,
+      highest_level: entry.max_level || 0,
+      levels_seen: Array.from(entry._levelSet).sort((a, b) => levelNumber(a) - levelNumber(b)).join(", "),
+      bin_types_seen: arrayText(Array.from(entry._binTypeSet)),
+      bin_sizes_seen: arrayText(Array.from(entry._binSizeSet))
+    }));
+
+    const rankedSkuRecommendations = sortPickReportRows(skuRecommendationRows, rankBy, "sku");
+    const abcMetricKey = rankBy === "pick_qty" ? "pick_qty" : "pick_count";
+    const totalAbcMetric = rankedSkuRecommendations.reduce((sum, entry) => sum + safeNumber(entry?.[abcMetricKey] || 0), 0);
+    let cumulativeAbcMetric = 0;
+    const abcVelocitySkus = rankedSkuRecommendations.map((entry, index) => {
+      const metricValue = safeNumber(entry?.[abcMetricKey] || 0);
+      cumulativeAbcMetric += metricValue;
+      const cumulativeMetricShare = totalAbcMetric ? (cumulativeAbcMetric / totalAbcMetric) * 100 : 0;
+      const abcClass = index === 0 || cumulativeMetricShare <= 80
+        ? "A"
+        : cumulativeMetricShare <= 95
+          ? "B"
+          : "C";
+      return {
+        ...entry,
+        abc_rank: index + 1,
+        abc_class: abcClass,
+        abc_metric: abcMetricKey,
+        abc_metric_value: metricValue,
+        metric_share: totalAbcMetric ? (metricValue / totalAbcMetric) * 100 : 0,
+        cumulative_metric_share: cumulativeMetricShare
+      };
+    });
+    const abcVelocitySummaryMap = new Map([
+      ["A", { abc_class: "A", sku_count: 0, pick_count: 0, pick_qty: 0, metric_value: 0 }],
+      ["B", { abc_class: "B", sku_count: 0, pick_count: 0, pick_qty: 0, metric_value: 0 }],
+      ["C", { abc_class: "C", sku_count: 0, pick_count: 0, pick_qty: 0, metric_value: 0 }]
+    ]);
+    for (const entry of abcVelocitySkus) {
+      const summaryEntry = abcVelocitySummaryMap.get(entry.abc_class);
+      if (!summaryEntry) continue;
+      summaryEntry.sku_count += 1;
+      summaryEntry.pick_count += Number(entry.pick_count || 0);
+      summaryEntry.pick_qty += safeNumber(entry.pick_qty || 0);
+      summaryEntry.metric_value += safeNumber(entry.abc_metric_value || 0);
+    }
+    const abcVelocitySummary = Array.from(abcVelocitySummaryMap.values()).map((entry) => ({
+      ...entry,
+      metric_share: totalAbcMetric ? (safeNumber(entry.metric_value || 0) / totalAbcMetric) * 100 : 0
+    }));
+    const abcVelocityMap = new Map(abcVelocitySkus.map((entry) => [entry.sku, entry]));
+    const abcWeightMap = { A: 1, B: 0.68, C: 0.36 };
+
+    const replenishmentSkuMap = new Map();
+    for (const entry of replenishmentLocations) {
+      const sku = normalizeSku(entry?.sku);
+      if (!sku) continue;
+      const aggregate = replenishmentSkuMap.get(sku) || {
+        sku,
+        estimated_replenishment_count: 0,
+        pick_count: 0,
+        pick_qty: 0,
+        location_count: 0,
+        locations_with_max: 0,
+        locations_missing_max: 0
+      };
+      aggregate.estimated_replenishment_count += Number(entry.estimated_replenishments || 0);
+      aggregate.pick_count += Number(entry.pick_count || 0);
+      aggregate.pick_qty += safeNumber(entry.pick_qty || 0);
+      aggregate.location_count += 1;
+      if (safeNumber(entry.max_bin_qty || 0) > 0) {
+        aggregate.locations_with_max += 1;
+      } else {
+        aggregate.locations_missing_max += 1;
+      }
+      replenishmentSkuMap.set(sku, aggregate);
+    }
+
+    const maxSkuMetric = rankedSkuRecommendations.reduce(
+      (max, entry) => Math.max(max, safeNumber(entry?.[abcMetricKey] || 0)),
+      1
+    );
+    const maxHighLevelMetric = rankedSkuRecommendations.reduce(
+      (max, entry) => Math.max(max, safeNumber(rankBy === "pick_qty" ? entry?.high_level_pick_qty : entry?.high_level_pick_count)),
+      1
+    );
+    const maxBulkMetric = rankedSkuRecommendations.reduce(
+      (max, entry) => Math.max(max, safeNumber(rankBy === "pick_qty" ? entry?.bulk_bin_pick_qty : entry?.bulk_bin_pick_count)),
+      1
+    );
+    const maxSkuReplenishments = Array.from(replenishmentSkuMap.values()).reduce(
+      (max, entry) => Math.max(max, safeNumber(entry?.estimated_replenishment_count || 0)),
+      1
+    );
+
+    const moveLowerRecommendations = abcVelocitySkus
+      .map((entry) => {
+        const rankMetricValue = safeNumber(entry?.[abcMetricKey] || 0);
+        const highLevelMetricValue = safeNumber(rankBy === "pick_qty" ? entry?.high_level_pick_qty : entry?.high_level_pick_count);
+        const highLevelShare = safeRatio(highLevelMetricValue, rankMetricValue);
+        const activityNorm = safeRatio(rankMetricValue, maxSkuMetric);
+        const highLevelNorm = safeRatio(highLevelMetricValue, maxHighLevelMetric);
+        const replenishmentStats = replenishmentSkuMap.get(entry.sku) || null;
+        const replenishmentNorm = safeRatio(replenishmentStats?.estimated_replenishment_count || 0, maxSkuReplenishments);
+        const abcWeight = abcWeightMap[entry.abc_class] || 0.2;
+        const noLowLevelCoverage = Number(entry.low_level_pick_count || 0) <= 0 ? 1 : 0;
+        const score = roundMetric(
+          100 * (
+            (highLevelShare * 0.3) +
+            (highLevelNorm * 0.25) +
+            (activityNorm * 0.2) +
+            (replenishmentNorm * 0.15) +
+            (Math.max(abcWeight, noLowLevelCoverage) * 0.1)
+          ),
+          1
+        );
+        const reasons = [];
+        if (highLevelShare >= 0.7) {
+          reasons.push("Most picks happen above target level");
+        } else if (highLevelShare >= 0.35) {
+          reasons.push("A large share of picks happen above target level");
+        }
+        if (noLowLevelCoverage) {
+          reasons.push("No low-level pick history");
+        }
+        if (safeNumber(replenishmentStats?.estimated_replenishment_count || 0) >= 3) {
+          reasons.push("High replenishment burden");
+        }
+        if (entry.abc_class === "A") {
+          reasons.push("A-class velocity");
+        } else if (entry.abc_class === "B") {
+          reasons.push("B-class velocity");
+        }
+        return {
+          sku: entry.sku,
+          description: entry.description,
+          abc_class: entry.abc_class,
+          pick_count: entry.pick_count,
+          pick_qty: entry.pick_qty,
+          high_level_pick_count: entry.high_level_pick_count,
+          high_level_pick_qty: entry.high_level_pick_qty,
+          low_level_pick_count: entry.low_level_pick_count,
+          low_level_pick_qty: entry.low_level_pick_qty,
+          lowest_level: entry.lowest_level,
+          highest_level: entry.highest_level,
+          estimated_replenishments: Number(replenishmentStats?.estimated_replenishment_count || 0),
+          high_level_share: roundMetric(highLevelShare * 100, 1),
+          move_lower_score: score,
+          recommendation_reason: arrayText(reasons),
+          suggested_action: noLowLevelCoverage
+            ? `Move into a pick face below level ${HIGH_LEVEL_THRESHOLD}`
+            : `Increase low-level coverage and reduce level ${HIGH_LEVEL_THRESHOLD}+ picking`
+        };
+      })
+      .filter((entry) => Number(entry.high_level_pick_count || 0) > 0 && safeNumber(entry.move_lower_score || 0) >= 15)
+      .sort((a, b) => (
+        safeNumber(b.move_lower_score || 0) - safeNumber(a.move_lower_score || 0) ||
+        (rankBy === "pick_qty" ? safeNumber(b.high_level_pick_qty || 0) - safeNumber(a.high_level_pick_qty || 0) : Number(b.high_level_pick_count || 0) - Number(a.high_level_pick_count || 0)) ||
+        String(a.sku || "").localeCompare(String(b.sku || ""))
+      ))
+      .slice(0, Math.max(limit, 25));
+
+    const moveToPickBinRecommendations = abcVelocitySkus
+      .map((entry) => {
+        const rankMetricValue = safeNumber(entry?.[abcMetricKey] || 0);
+        const bulkMetricValue = safeNumber(rankBy === "pick_qty" ? entry?.bulk_bin_pick_qty : entry?.bulk_bin_pick_count);
+        const bulkShare = safeRatio(bulkMetricValue, rankMetricValue);
+        const activityNorm = safeRatio(rankMetricValue, maxSkuMetric);
+        const bulkNorm = safeRatio(bulkMetricValue, maxBulkMetric);
+        const abcWeight = abcWeightMap[entry.abc_class] || 0.2;
+        const existingPickFace = Number(entry.pick_bin_pick_count || 0) > 0;
+        const score = roundMetric(
+          100 * (
+            (bulkShare * 0.35) +
+            (bulkNorm * 0.25) +
+            (activityNorm * 0.2) +
+            (abcWeight * 0.1) +
+            ((existingPickFace ? 0 : 1) * 0.1)
+          ),
+          1
+        );
+        const reasons = [];
+        if (bulkShare >= 0.8) {
+          reasons.push("Mostly picked from bulk bins");
+        } else if (bulkShare >= 0.35) {
+          reasons.push("A meaningful share of picks come from bulk bins");
+        }
+        if (!existingPickFace) {
+          reasons.push("No current pick-face evidence");
+        }
+        if (entry.abc_class === "A") {
+          reasons.push("A-class velocity");
+        } else if (entry.abc_class === "B") {
+          reasons.push("B-class velocity");
+        }
+        return {
+          sku: entry.sku,
+          description: entry.description,
+          abc_class: entry.abc_class,
+          pick_count: entry.pick_count,
+          pick_qty: entry.pick_qty,
+          bulk_bin_pick_count: entry.bulk_bin_pick_count,
+          bulk_bin_pick_qty: entry.bulk_bin_pick_qty,
+          pick_bin_pick_count: entry.pick_bin_pick_count,
+          pick_bin_pick_qty: entry.pick_bin_pick_qty,
+          bulk_share: roundMetric(bulkShare * 100, 1),
+          move_to_pick_bin_score: score,
+          recommendation_reason: arrayText(reasons),
+          suggested_action: existingPickFace
+            ? "Expand or improve the pick-face so fewer picks land in bulk"
+            : "Create or assign a dedicated pick face"
+        };
+      })
+      .filter((entry) => Number(entry.bulk_bin_pick_count || 0) > 0 && safeNumber(entry.move_to_pick_bin_score || 0) >= 15)
+      .sort((a, b) => (
+        safeNumber(b.move_to_pick_bin_score || 0) - safeNumber(a.move_to_pick_bin_score || 0) ||
+        (rankBy === "pick_qty" ? safeNumber(b.bulk_bin_pick_qty || 0) - safeNumber(a.bulk_bin_pick_qty || 0) : Number(b.bulk_bin_pick_count || 0) - Number(a.bulk_bin_pick_count || 0)) ||
+        String(a.sku || "").localeCompare(String(b.sku || ""))
+      ))
+      .slice(0, Math.max(limit, 25));
+
+    const maxFaceReplenishments = replenishmentLocations.reduce(
+      (max, entry) => Math.max(max, Number(entry.estimated_replenishments || 0)),
+      1
+    );
+    const maxCapacityCycles = replenishmentLocations.reduce((max, entry) => {
+      const cycles = safeNumber(entry.max_bin_qty || 0) > 0
+        ? safeRatio(entry.pick_qty, entry.max_bin_qty)
+        : 0;
+      return Math.max(max, cycles);
+    }, 1);
+    const pickFaceSuitability = replenishmentLocations
+      .map((entry) => {
+        const abcEntry = abcVelocityMap.get(entry.sku) || null;
+        const abcWeight = abcWeightMap[abcEntry?.abc_class] || 0.2;
+        const levelNum = levelNumber(entry.level_number || entry.level);
+        const levelPenalty = levelNum >= HIGH_LEVEL_THRESHOLD ? 1 : 0;
+        const capacityCycles = safeNumber(entry.max_bin_qty || 0) > 0 ? safeRatio(entry.pick_qty, entry.max_bin_qty) : 0;
+        const capacityPenalty = safeNumber(entry.max_bin_qty || 0) > 0
+          ? clamp((capacityCycles - 1) / Math.max(1, maxCapacityCycles - 1))
+          : 0.7;
+        const replenishmentPenalty = safeRatio(entry.estimated_replenishments, maxFaceReplenishments);
+        const avgDailyQty = loadedDayCount ? safeNumber(entry.pick_qty || 0) / loadedDayCount : safeNumber(entry.pick_qty || 0);
+        const daysOfCoverAtMax = avgDailyQty > 0 && safeNumber(entry.max_bin_qty || 0) > 0
+          ? safeNumber(entry.max_bin_qty || 0) / avgDailyQty
+          : 0;
+        const issues = [];
+        if (levelPenalty) {
+          issues.push(`Above level ${HIGH_LEVEL_THRESHOLD - 1}`);
+        }
+        if (!entry.bin_size || entry.bin_size === "Unknown") {
+          issues.push("Unknown bin size");
+        }
+        if (safeNumber(entry.max_bin_qty || 0) <= 0) {
+          issues.push("No Max. Bin Qty");
+        } else if (Number(entry.estimated_replenishments || 0) >= 3) {
+          issues.push("High refill burden");
+        } else if (Number(entry.estimated_replenishments || 0) >= 1) {
+          issues.push("Needs regular refill");
+        }
+        if (daysOfCoverAtMax > 0 && daysOfCoverAtMax < 2) {
+          issues.push("Less than 2 days of cover at max");
+        }
+        const suitabilityScore = roundMetric(
+          100 * (
+            (replenishmentPenalty * 0.35) +
+            (capacityPenalty * 0.25) +
+            (levelPenalty * 0.2) +
+            (((!entry.bin_size || entry.bin_size === "Unknown") || safeNumber(entry.max_bin_qty || 0) <= 0 ? 1 : 0) * 0.1) +
+            (abcWeight * 0.1)
+          ),
+          1
+        );
+        return {
+          location: entry.location,
+          sku: entry.sku,
+          description: entry.description,
+          abc_class: abcEntry?.abc_class || "",
+          level: entry.level,
+          bin_size: entry.bin_size,
+          max_bin_qty: entry.max_bin_qty,
+          pick_count: entry.pick_count,
+          pick_qty: entry.pick_qty,
+          avg_daily_pick_qty: roundMetric(avgDailyQty, 2),
+          days_of_cover_at_max: roundMetric(daysOfCoverAtMax, 2),
+          estimated_replenishments: entry.estimated_replenishments,
+          suitability_score: suitabilityScore,
+          issues: issues,
+          issue_summary: arrayText(issues)
+        };
+      })
+      .filter((entry) => Array.isArray(entry.issues) && entry.issues.length > 0)
+      .sort((a, b) => (
+        safeNumber(b.suitability_score || 0) - safeNumber(a.suitability_score || 0) ||
+        Number(b.estimated_replenishments || 0) - Number(a.estimated_replenishments || 0) ||
+        String(a.location || "").localeCompare(String(b.location || "")) ||
+        String(a.sku || "").localeCompare(String(b.sku || ""))
+      ))
+      .slice(0, 50);
+
+    const levelComplianceEasyWins = moveLowerRecommendations
+      .filter((entry) => safeNumber(entry.high_level_share || 0) >= 60 || Number(entry.low_level_pick_count || 0) <= 0)
+      .slice(0, 20);
+    const levelCompliance = {
+      summary: {
+        threshold: HIGH_LEVEL_THRESHOLD,
+        compliant_pick_count: Math.max(0, totalPickCount - highLevelPickCount),
+        compliant_pick_qty: Math.max(0, safeNumber(totalPickQty || 0) - safeNumber(highLevelPickQty || 0)),
+        high_level_pick_count: highLevelPickCount,
+        high_level_pick_qty: highLevelPickQty,
+        compliant_share_of_picks: totalPickCount ? ((totalPickCount - highLevelPickCount) / totalPickCount) * 100 : 0,
+        high_level_share_of_picks: totalPickCount ? (highLevelPickCount / totalPickCount) * 100 : 0,
+        high_level_sku_count: highLevelSkus.length,
+        easy_win_count: levelComplianceEasyWins.length
+      },
+      easy_wins: levelComplianceEasyWins
+    };
+
+    const recommendations = {
+      summary: {
+        recommendation_note: "Scores are weighted from pick activity, level position, replenishment burden, bulk-vs-pick behaviour, and ABC velocity so the highest rows should be the most actionable first.",
+        move_lower_candidate_count: moveLowerRecommendations.length,
+        move_to_pick_bin_candidate_count: moveToPickBinRecommendations.length,
+        pick_face_issue_count: pickFaceSuitability.length,
+        abc_a_sku_count: Number(abcVelocitySummary.find((entry) => entry.abc_class === "A")?.sku_count || 0),
+        abc_b_sku_count: Number(abcVelocitySummary.find((entry) => entry.abc_class === "B")?.sku_count || 0),
+        abc_c_sku_count: Number(abcVelocitySummary.find((entry) => entry.abc_class === "C")?.sku_count || 0),
+        level_compliance_easy_win_count: levelComplianceEasyWins.length
+      },
+      abc_velocity: {
+        metric: abcMetricKey,
+        thresholds: { a_max_cumulative_share: 80, b_max_cumulative_share: 95 },
+        summary: abcVelocitySummary,
+        skus: abcVelocitySkus.slice(0, Math.max(limit, 50))
+      },
+      slotting: {
+        move_lower: moveLowerRecommendations,
+        move_to_pick_bin: moveToPickBinRecommendations
+      },
+      level_compliance: levelCompliance,
+      pick_face_suitability: pickFaceSuitability
+    };
 
     return {
       meta: {
@@ -2255,7 +2974,9 @@ class ItemTrackerService {
         sku_detail_source: "Published snapshot SKU detail",
         sku_detail_note: "SKU rankings are aggregated from the SKU detail stored inside each published pick snapshot.",
         structure_note: "Pick/bulk uses BLBKPK (B/P), bin size uses BLSCOD, and replenishment estimates use BLMAXQ when that field exists in the warehouse snapshot.",
-        replenishment_note: replenishmentNote
+        replenishment_note: replenishmentNote,
+        recommendation_note: recommendations.summary.recommendation_note,
+        abc_metric: abcMetricKey
       },
       summary: {
         loaded_day_count: loadedDayCount,
@@ -2286,11 +3007,14 @@ class ItemTrackerService {
         estimated_replenishment_count: estimatedReplenishmentCount,
         replenishment_location_count: replenishmentLocations.length,
         replenishment_locations_with_max: replenishmentWithMax.length,
-        replenishment_locations_missing_max: replenishmentMissingMax.length
+        replenishment_locations_missing_max: replenishmentMissingMax.length,
+        move_lower_candidate_count: recommendations.summary.move_lower_candidate_count,
+        move_to_pick_bin_candidate_count: recommendations.summary.move_to_pick_bin_candidate_count,
+        pick_face_issue_count: recommendations.summary.pick_face_issue_count
       },
-      top_skus: sortPickReportRows(topSkus, rankBy, "sku").slice(0, limit),
-      top_locations: sortPickReportRows(topLocations, rankBy, "location").slice(0, 25),
-      top_aisles: sortPickReportRows(topAisles, rankBy, "aisle_prefix").slice(0, 20),
+      top_skus: sortedTopSkus.slice(0, limit),
+      top_locations: sortedTopLocations.slice(0, 25),
+      top_aisles: sortedTopAisles.slice(0, 20),
       sku_outliers: buildOutlierRows(topSkus, rankBy, 16),
       location_outliers: buildOutlierRows(topLocations, rankBy, 16),
       daily_breakdown: dailyBreakdown,
@@ -2306,7 +3030,8 @@ class ItemTrackerService {
           locations_missing_max: replenishmentMissingMax.length
         },
         locations: replenishmentLocations.slice(0, 50)
-      }
+      },
+      recommendations
     };
   }
 
@@ -2359,7 +3084,10 @@ class ItemTrackerService {
         { metric: `Picks from level ${meta.high_level_threshold || HIGH_LEVEL_THRESHOLD}+`, value: Number(summary.high_level_pick_count || 0) },
         { metric: `Quantity from level ${meta.high_level_threshold || HIGH_LEVEL_THRESHOLD}+`, value: safeNumber(summary.high_level_pick_qty || 0) },
         { metric: "Estimated replenishments", value: Number(summary.estimated_replenishment_count || 0) },
-        { metric: "Replenishment locations", value: Number(summary.replenishment_location_count || 0) }
+        { metric: "Replenishment locations", value: Number(summary.replenishment_location_count || 0) },
+        { metric: "Move-lower candidates", value: Number(summary.move_lower_candidate_count || 0) },
+        { metric: "Bulk-to-pick candidates", value: Number(summary.move_to_pick_bin_candidate_count || 0) },
+        { metric: "Pick-face issues", value: Number(summary.pick_face_issue_count || 0) }
       ]
     );
 
@@ -2390,9 +3118,129 @@ class ItemTrackerService {
         { metric: "SKU detail note", value: meta.sku_detail_note || "" },
         { metric: "Structure note", value: meta.structure_note || "" },
         { metric: "Replenishment note", value: meta.replenishment_note || "" },
+        { metric: "Recommendation note", value: meta.recommendation_note || "" },
         { metric: "Item catalog snapshot date", value: meta.item_catalog_meta?.snapshot_date || "" },
         { metric: "Item catalog uploaded at", value: meta.item_catalog_meta?.uploaded_at || "" }
       ]
+    );
+
+    addWorksheetTable(
+      workbook,
+      "ABC Summary",
+      [
+        { header: "Class", key: "abc_class", width: 10 },
+        { header: "SKU count", key: "sku_count", width: 12, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Pick count", key: "pick_count", width: 14, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Pick quantity", key: "pick_qty", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: `${meta.abc_metric || sortMetric} value`, key: "metric_value", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Metric share (%)", key: "metric_share", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.0" }
+      ],
+      reports?.recommendations?.abc_velocity?.summary || [],
+      "No ABC summary rows are available for the selected range."
+    );
+
+    addWorksheetTable(
+      workbook,
+      "ABC Velocity",
+      [
+        { header: "ABC rank", key: "abc_rank", width: 10, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "ABC class", key: "abc_class", width: 10 },
+        { header: "SKU", key: "sku", width: 18 },
+        { header: "Description", key: "description", width: 36, maxWidth: 60 },
+        { header: "Pick count", key: "pick_count", width: 14, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Pick quantity", key: "pick_qty", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: `${meta.abc_metric || sortMetric} value`, key: "abc_metric_value", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Metric share (%)", key: "metric_share", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.0" },
+        { header: "Cumulative share (%)", key: "cumulative_metric_share", width: 18, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.0" },
+        { header: "High-level picks", key: "high_level_pick_count", width: 16, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Bulk-bin picks", key: "bulk_bin_pick_count", width: 16, alignment: { horizontal: "right", vertical: "top" } }
+      ],
+      reports?.recommendations?.abc_velocity?.skus || [],
+      "No ABC velocity rows are available for the selected range."
+    );
+
+    addWorksheetTable(
+      workbook,
+      "Move Lower",
+      [
+        { header: "Rank", key: "rank", width: 10, value: (_row, index) => index + 1, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "SKU", key: "sku", width: 18 },
+        { header: "Description", key: "description", width: 36, maxWidth: 60 },
+        { header: "ABC class", key: "abc_class", width: 10 },
+        { header: "Score", key: "move_lower_score", width: 12, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.0" },
+        { header: "High-level share (%)", key: "high_level_share", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.0" },
+        { header: "High-level picks", key: "high_level_pick_count", width: 16, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "High-level qty", key: "high_level_pick_qty", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Lower-level picks", key: "low_level_pick_count", width: 16, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Estimated replenishments", key: "estimated_replenishments", width: 20, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Suggested action", key: "suggested_action", width: 28, maxWidth: 48 },
+        { header: "Reason", key: "recommendation_reason", width: 30, maxWidth: 56 }
+      ],
+      reports?.recommendations?.slotting?.move_lower || [],
+      "No move-lower recommendations are available for the selected range."
+    );
+
+    addWorksheetTable(
+      workbook,
+      "Bulk To Pick",
+      [
+        { header: "Rank", key: "rank", width: 10, value: (_row, index) => index + 1, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "SKU", key: "sku", width: 18 },
+        { header: "Description", key: "description", width: 36, maxWidth: 60 },
+        { header: "ABC class", key: "abc_class", width: 10 },
+        { header: "Score", key: "move_to_pick_bin_score", width: 12, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.0" },
+        { header: "Bulk share (%)", key: "bulk_share", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.0" },
+        { header: "Bulk-bin picks", key: "bulk_bin_pick_count", width: 16, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Bulk-bin qty", key: "bulk_bin_pick_qty", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Pick-bin picks", key: "pick_bin_pick_count", width: 16, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Suggested action", key: "suggested_action", width: 28, maxWidth: 48 },
+        { header: "Reason", key: "recommendation_reason", width: 30, maxWidth: 56 }
+      ],
+      reports?.recommendations?.slotting?.move_to_pick_bin || [],
+      "No bulk-to-pick recommendations are available for the selected range."
+    );
+
+    addWorksheetTable(
+      workbook,
+      "Level Easy Wins",
+      [
+        { header: "Rank", key: "rank", width: 10, value: (_row, index) => index + 1, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "SKU", key: "sku", width: 18 },
+        { header: "Description", key: "description", width: 36, maxWidth: 60 },
+        { header: "ABC class", key: "abc_class", width: 10 },
+        { header: "Move-lower score", key: "move_lower_score", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.0" },
+        { header: "High-level share (%)", key: "high_level_share", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.0" },
+        { header: "High-level picks", key: "high_level_pick_count", width: 16, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Lower-level picks", key: "low_level_pick_count", width: 16, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Suggested action", key: "suggested_action", width: 28, maxWidth: 48 },
+        { header: "Reason", key: "recommendation_reason", width: 30, maxWidth: 56 }
+      ],
+      reports?.recommendations?.level_compliance?.easy_wins || [],
+      "No easy-win level compliance rows are available for the selected range."
+    );
+
+    addWorksheetTable(
+      workbook,
+      "Pick Face Suit",
+      [
+        { header: "Rank", key: "rank", width: 10, value: (_row, index) => index + 1, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Location", key: "location", width: 18 },
+        { header: "SKU", key: "sku", width: 18 },
+        { header: "Description", key: "description", width: 36, maxWidth: 60 },
+        { header: "ABC class", key: "abc_class", width: 10 },
+        { header: "Level", key: "level", width: 10 },
+        { header: "Bin size", key: "bin_size", width: 12 },
+        { header: "Max bin qty", key: "max_bin_qty", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Pick count", key: "pick_count", width: 14, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Pick quantity", key: "pick_qty", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Avg daily qty", key: "avg_daily_pick_qty", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Days of cover at max", key: "days_of_cover_at_max", width: 18, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Estimated replenishments", key: "estimated_replenishments", width: 20, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Suitability score", key: "suitability_score", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.0" },
+        { header: "Issues", key: "issue_summary", width: 34, maxWidth: 60 }
+      ],
+      reports?.recommendations?.pick_face_suitability || [],
+      "No pick-face suitability rows are available for the selected range."
     );
 
     addWorksheetTable(

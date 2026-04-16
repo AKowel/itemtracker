@@ -647,7 +647,8 @@ async function createApp() {
         mode: String(req.query.mode || "").trim(),
         snapshotDate: String(req.query.date || "").trim(),
         startDate: String(req.query.start || "").trim(),
-        endDate: String(req.query.end || "").trim()
+        endDate: String(req.query.end || "").trim(),
+        rankBy: String(req.query.rankBy || "").trim()
       });
       return res.json({ ok: true, heatmap });
     })
