@@ -181,6 +181,12 @@ async function createApp() {
   }
 
   function requireAdminApi(req, res, next) {
+    // Allow machine-to-machine calls using a static API key header
+    const apiKey = req.headers['x-api-key'];
+    if (apiKey && config.adminApiKey && apiKey === config.adminApiKey) {
+      return next();
+    }
+    // Otherwise require a logged-in admin session
     if (!req.currentUser) {
       return res.status(401).json({ ok: false, error: "You need to log in first." });
     }

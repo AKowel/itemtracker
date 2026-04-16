@@ -25,7 +25,10 @@ const config = {
   adminEmails: String(process.env.ADMIN_EMAILS || "")
     .split(/[,\n;]/)
     .map((item) => item.trim().toLowerCase())
-    .filter(Boolean)
+    .filter(Boolean),
+  // Static API key for machine-to-machine calls (e.g. warehouse editor publish).
+  // Leave empty to disable API key auth. Set a strong random string in .env.
+  adminApiKey: process.env.ADMIN_API_KEY || "",
 };
 
 module.exports = { config };
