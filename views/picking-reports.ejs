@@ -74,97 +74,175 @@
     </div>
   </section>
 
-  <section class="metrics-grid reports-metrics-grid">
-    <article class="metric-card">
-      <p class="eyebrow">Total picks</p>
-      <strong id="reportsTotalPicksMetric">0</strong>
-      <span>All pick events in the selected range</span>
-    </article>
-    <article class="metric-card">
-      <p class="eyebrow">Total quantity</p>
-      <strong id="reportsTotalQtyMetric">0</strong>
-      <span>Total units picked across the loaded snapshots</span>
-    </article>
-    <article class="metric-card">
-      <p class="eyebrow">Active SKUs</p>
-      <strong id="reportsActiveSkusMetric">0</strong>
-      <span>SKUs with recorded pick activity in this range</span>
-    </article>
-    <article class="metric-card">
-      <p class="eyebrow">Active locations</p>
-      <strong id="reportsActiveLocationsMetric">0</strong>
-      <span>Locations touched by picks in the loaded days</span>
-    </article>
-    <article class="metric-card">
-      <p class="eyebrow">Avg qty / pick</p>
-      <strong id="reportsAvgQtyPerPickMetric">0</strong>
-      <span>How many units each pick averages overall</span>
-    </article>
-    <article class="metric-card">
-      <p class="eyebrow">Avg picks / day</p>
-      <strong id="reportsAvgPicksPerDayMetric">0</strong>
-      <span>Average daily pick count across loaded days</span>
-    </article>
-    <article class="metric-card">
-      <p class="eyebrow">Pick-bin picks</p>
-      <strong id="reportsPickBinPicksMetric">0</strong>
-      <span>Picks coming from locations marked as pick bins</span>
-    </article>
-    <article class="metric-card">
-      <p class="eyebrow">Bulk-bin picks</p>
-      <strong id="reportsBulkBinPicksMetric">0</strong>
-      <span>Picks coming from locations marked as bulk bins</span>
-    </article>
-    <article class="metric-card">
-      <p class="eyebrow">Level 10+ picks</p>
-      <strong id="reportsHighLevelPicksMetric">0</strong>
-      <span>Touches happening on higher levels that may need slotting review</span>
-    </article>
-    <article class="metric-card">
-      <p class="eyebrow">Est. replenishments</p>
-      <strong id="reportsEstimatedReplenishmentsMetric">0</strong>
-      <span>Estimated pick-bin refills based on Max. Bin Qty where available</span>
-    </article>
-  </section>
-
-  <section class="panel-card reports-summary-card">
+  <section class="panel-card reports-tabs-card">
     <div class="panel-head">
       <div>
-        <p class="eyebrow">Coverage</p>
-        <h2>Snapshot Summary</h2>
-        <p>Use this to confirm how much data is actually included before you trust the rankings.</p>
+        <p class="eyebrow">Workbook View</p>
+        <h2>Report Tabs</h2>
+        <p>Switch between grouped report tabs, similar to moving across sheets in Excel.</p>
       </div>
     </div>
-    <div id="reportsSummaryWrap" class="reports-summary-wrap">
-      <p class="admin-loading">Loading...</p>
+    <div class="reports-tab-list" role="tablist" aria-label="Picking report tabs">
+      <button type="button" class="reports-tab is-active" data-report-tab="overview" aria-selected="true">Overview</button>
+      <button type="button" class="reports-tab" data-report-tab="sku" aria-selected="false">SKUs</button>
+      <button type="button" class="reports-tab" data-report-tab="locations" aria-selected="false">Locations</button>
+      <button type="button" class="reports-tab" data-report-tab="structure" aria-selected="false">Structure</button>
+      <button type="button" class="reports-tab" data-report-tab="replenishment" aria-selected="false">Replenishment</button>
+      <button type="button" class="reports-tab" data-report-tab="ideas" aria-selected="false">Ideas</button>
     </div>
   </section>
 
-  <section class="panel-card">
-    <div class="panel-head">
-      <div>
-        <p class="eyebrow">SKU Ranking</p>
-        <h2>Top Picked SKUs</h2>
-        <p>The strongest movers across the selected range, ranked by the current sort metric.</p>
-      </div>
-    </div>
-    <div id="reportsTopSkusWrap">
-      <p class="admin-loading">Loading...</p>
-    </div>
-  </section>
+  <section class="reports-tab-panel is-active" data-report-panel="overview">
+    <section class="metrics-grid reports-metrics-grid">
+      <article class="metric-card">
+        <p class="eyebrow">Total picks</p>
+        <strong id="reportsTotalPicksMetric">0</strong>
+        <span>All pick events in the selected range</span>
+      </article>
+      <article class="metric-card">
+        <p class="eyebrow">Total quantity</p>
+        <strong id="reportsTotalQtyMetric">0</strong>
+        <span>Total units picked across the loaded snapshots</span>
+      </article>
+      <article class="metric-card">
+        <p class="eyebrow">Active SKUs</p>
+        <strong id="reportsActiveSkusMetric">0</strong>
+        <span>SKUs with recorded pick activity in this range</span>
+      </article>
+      <article class="metric-card">
+        <p class="eyebrow">Active locations</p>
+        <strong id="reportsActiveLocationsMetric">0</strong>
+        <span>Locations touched by picks in the loaded days</span>
+      </article>
+      <article class="metric-card">
+        <p class="eyebrow">Avg qty / pick</p>
+        <strong id="reportsAvgQtyPerPickMetric">0</strong>
+        <span>How many units each pick averages overall</span>
+      </article>
+      <article class="metric-card">
+        <p class="eyebrow">Avg picks / day</p>
+        <strong id="reportsAvgPicksPerDayMetric">0</strong>
+        <span>Average daily pick count across loaded days</span>
+      </article>
+      <article class="metric-card">
+        <p class="eyebrow">Pick-bin picks</p>
+        <strong id="reportsPickBinPicksMetric">0</strong>
+        <span>Picks coming from locations marked as pick bins</span>
+      </article>
+      <article class="metric-card">
+        <p class="eyebrow">Bulk-bin picks</p>
+        <strong id="reportsBulkBinPicksMetric">0</strong>
+        <span>Picks coming from locations marked as bulk bins</span>
+      </article>
+      <article class="metric-card">
+        <p class="eyebrow">Level 10+ picks</p>
+        <strong id="reportsHighLevelPicksMetric">0</strong>
+        <span>Touches happening on higher levels that may need slotting review</span>
+      </article>
+      <article class="metric-card">
+        <p class="eyebrow">Est. replenishments</p>
+        <strong id="reportsEstimatedReplenishmentsMetric">0</strong>
+        <span>Estimated pick-bin refills based on Max. Bin Qty where available</span>
+      </article>
+    </section>
 
-  <section class="reports-two-up">
+    <section class="panel-card reports-summary-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Coverage</p>
+          <h2>Snapshot Summary</h2>
+          <p>Use this to confirm how much data is actually included before you trust the rankings.</p>
+        </div>
+      </div>
+      <div id="reportsSummaryWrap" class="reports-summary-wrap">
+        <p class="admin-loading">Loading...</p>
+      </div>
+    </section>
+
     <section class="panel-card">
       <div class="panel-head">
         <div>
-          <p class="eyebrow">SKU Outliers</p>
-          <h2>Unusually Hot SKUs</h2>
-          <p>SKUs whose activity sits well above the rest of the loaded set.</p>
+          <p class="eyebrow">Trend</p>
+          <h2>Daily Breakdown</h2>
+          <p>Each loaded snapshot day, with picks, picked quantity, and how many SKUs and locations were active.</p>
         </div>
       </div>
-      <div id="reportsSkuOutliersWrap">
+      <div id="reportsDailyWrap">
         <p class="admin-loading">Loading...</p>
       </div>
+    </section>
+  </section>
+
+  <section class="reports-tab-panel" data-report-panel="sku" hidden>
+    <section class="panel-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">SKU Ranking</p>
+          <h2>Top Picked SKUs</h2>
+          <p>The strongest movers across the selected range, ranked by the current sort metric.</p>
+        </div>
+      </div>
+      <div id="reportsTopSkusWrap">
+        <p class="admin-loading">Loading...</p>
+      </div>
+    </section>
+
+    <section class="reports-two-up">
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">SKU Outliers</p>
+            <h2>Unusually Hot SKUs</h2>
+            <p>SKUs whose activity sits well above the rest of the loaded set.</p>
+          </div>
+        </div>
+        <div id="reportsSkuOutliersWrap">
+          <p class="admin-loading">Loading...</p>
+        </div>
+      </section>
+
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Slotting Candidates</p>
+            <h2>Level 10+ SKU Candidates</h2>
+            <p>High-activity SKUs still getting picked from level 10 and above, which may be the first candidates to move lower.</p>
+          </div>
+        </div>
+        <div id="reportsHighLevelSkusWrap">
+          <p class="admin-loading">Loading...</p>
+        </div>
+      </section>
+    </section>
+  </section>
+
+  <section class="reports-tab-panel" data-report-panel="locations" hidden>
+    <section class="reports-two-up">
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Location Ranking</p>
+            <h2>Top Locations</h2>
+            <p>The bins doing the most work in the currently loaded window.</p>
+          </div>
+        </div>
+        <div id="reportsTopLocationsWrap">
+          <p class="admin-loading">Loading...</p>
+        </div>
+      </section>
+
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Aisle Ranking</p>
+            <h2>Top Aisles</h2>
+            <p>Useful for spotting the areas that will drive congestion and replenishment pressure.</p>
+          </div>
+        </div>
+        <div id="reportsTopAislesWrap">
+          <p class="admin-loading">Loading...</p>
+        </div>
+      </section>
     </section>
 
     <section class="panel-card">
@@ -181,63 +259,35 @@
     </section>
   </section>
 
-  <section class="reports-two-up">
-    <section class="panel-card">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">Location Ranking</p>
-          <h2>Top Locations</h2>
-          <p>The bins doing the most work in the currently loaded window.</p>
+  <section class="reports-tab-panel" data-report-panel="structure" hidden>
+    <section class="reports-two-up">
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Level Profile</p>
+            <h2>Level Breakdown</h2>
+            <p>See how picks split across levels, including how much of each level's workload comes from pick bins vs bulk bins.</p>
+          </div>
         </div>
-      </div>
-      <div id="reportsTopLocationsWrap">
-        <p class="admin-loading">Loading...</p>
-      </div>
+        <div id="reportsLevelBreakdownWrap">
+          <p class="admin-loading">Loading...</p>
+        </div>
+      </section>
+
+      <section class="panel-card">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Pick Vs Bulk</p>
+            <h2>Bin Type Breakdown</h2>
+            <p>Useful for checking whether the current pick/bin split is doing the work you expect.</p>
+          </div>
+        </div>
+        <div id="reportsBinTypeWrap">
+          <p class="admin-loading">Loading...</p>
+        </div>
+      </section>
     </section>
 
-    <section class="panel-card">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">Aisle Ranking</p>
-          <h2>Top Aisles</h2>
-          <p>Useful for spotting the areas that will drive congestion and replenishment pressure.</p>
-        </div>
-      </div>
-      <div id="reportsTopAislesWrap">
-        <p class="admin-loading">Loading...</p>
-      </div>
-    </section>
-  </section>
-
-  <section class="reports-two-up">
-    <section class="panel-card">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">Level Profile</p>
-          <h2>Level Breakdown</h2>
-          <p>See how picks split across levels, including how much of each level’s workload comes from pick bins vs bulk bins.</p>
-        </div>
-      </div>
-      <div id="reportsLevelBreakdownWrap">
-        <p class="admin-loading">Loading...</p>
-      </div>
-    </section>
-
-    <section class="panel-card">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">Pick Vs Bulk</p>
-          <h2>Bin Type Breakdown</h2>
-          <p>Useful for checking whether the current pick/bin split is doing the work you expect.</p>
-        </div>
-      </div>
-      <div id="reportsBinTypeWrap">
-        <p class="admin-loading">Loading...</p>
-      </div>
-    </section>
-  </section>
-
-  <section class="reports-two-up">
     <section class="panel-card">
       <div class="panel-head">
         <div>
@@ -250,73 +300,51 @@
         <p class="admin-loading">Loading...</p>
       </div>
     </section>
+  </section>
 
+  <section class="reports-tab-panel" data-report-panel="replenishment" hidden>
     <section class="panel-card">
       <div class="panel-head">
         <div>
-          <p class="eyebrow">Slotting Candidates</p>
-          <h2>Level 10+ SKU Candidates</h2>
-          <p>High-activity SKUs still getting picked from level 10 and above, which may be the first candidates to move lower.</p>
+          <p class="eyebrow">Replenishment</p>
+          <h2>Pick Bin Replenishment Estimate</h2>
+          <p>Estimated refills from bulk into pick bins using current pick-bin SKU matches and Max. Bin Qty from the warehouse snapshot.</p>
         </div>
       </div>
-      <div id="reportsHighLevelSkusWrap">
+      <div id="reportsReplenishmentWrap">
         <p class="admin-loading">Loading...</p>
       </div>
     </section>
   </section>
 
-  <section class="panel-card">
-    <div class="panel-head">
-      <div>
-        <p class="eyebrow">Replenishment</p>
-        <h2>Pick Bin Replenishment Estimate</h2>
-        <p>Estimated refills from bulk into pick bins using current pick-bin SKU matches and Max. Bin Qty from the warehouse snapshot.</p>
+  <section class="reports-tab-panel" data-report-panel="ideas" hidden>
+    <section class="panel-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Ideas</p>
+          <h2>Next Useful Reports</h2>
+          <p>These are good next candidates if you want to keep expanding this reporting side.</p>
+        </div>
       </div>
-    </div>
-    <div id="reportsReplenishmentWrap">
-      <p class="admin-loading">Loading...</p>
-    </div>
-  </section>
-
-  <section class="panel-card">
-    <div class="panel-head">
-      <div>
-        <p class="eyebrow">Trend</p>
-        <h2>Daily Breakdown</h2>
-        <p>Each loaded snapshot day, with picks, picked quantity, and how many SKUs and locations were active.</p>
+      <div class="reports-ideas-grid">
+        <article class="reports-idea-card">
+          <strong>High-pick low-stock SKUs</strong>
+          <p>Join current warehouse quantity onto the top movers so we can flag items likely to need replenishment first.</p>
+        </article>
+        <article class="reports-idea-card">
+          <strong>Empty but active locations</strong>
+          <p>Show the locations getting touched heavily even though they are currently empty or underused in the warehouse snapshot.</p>
+        </article>
+        <article class="reports-idea-card">
+          <strong>Volatile SKUs</strong>
+          <p>Highlight items that swing sharply from day to day so planning can spot promotion or availability effects quickly.</p>
+        </article>
+        <article class="reports-idea-card">
+          <strong>Congestion watch</strong>
+          <p>Trend aisle concentration over time so we can see whether picks are becoming more clustered and where the pinch points are.</p>
+        </article>
       </div>
-    </div>
-    <div id="reportsDailyWrap">
-      <p class="admin-loading">Loading...</p>
-    </div>
-  </section>
-
-  <section class="panel-card">
-    <div class="panel-head">
-      <div>
-        <p class="eyebrow">Ideas</p>
-        <h2>Next Useful Reports</h2>
-        <p>These are good next candidates if you want to keep expanding this reporting side.</p>
-      </div>
-    </div>
-    <div class="reports-ideas-grid">
-      <article class="reports-idea-card">
-        <strong>High-pick low-stock SKUs</strong>
-        <p>Join current warehouse quantity onto the top movers so we can flag items likely to need replenishment first.</p>
-      </article>
-      <article class="reports-idea-card">
-        <strong>Empty but active locations</strong>
-        <p>Show the locations getting touched heavily even though they are currently empty or underused in the warehouse snapshot.</p>
-      </article>
-      <article class="reports-idea-card">
-        <strong>Volatile SKUs</strong>
-        <p>Highlight items that swing sharply from day to day so planning can spot promotion or availability effects quickly.</p>
-      </article>
-      <article class="reports-idea-card">
-        <strong>Congestion watch</strong>
-        <p>Trend aisle concentration over time so we can see whether picks are becoming more clustered and where the pinch points are.</p>
-      </article>
-    </div>
+    </section>
   </section>
 </main>
 

@@ -11,6 +11,8 @@ const rankBySelect = doc?.getElementById("reportsRankBySelect") || null;
 const limitSelect = doc?.getElementById("reportsLimitSelect") || null;
 const exportButton = doc?.getElementById("reportsExportButton") || null;
 const reloadButton = doc?.getElementById("reportsReloadButton") || null;
+const reportTabs = Array.from(doc?.querySelectorAll("[data-report-tab]") || []);
+const reportPanels = Array.from(doc?.querySelectorAll("[data-report-panel]") || []);
 
 const dateChip = doc?.getElementById("reportsDateChip") || null;
 const coverageChip = doc?.getElementById("reportsCoverageChip") || null;
@@ -88,6 +90,30 @@ function setStatus(message, type = "") {
   if (!statusChip) return;
   statusChip.textContent = message || "Ready";
   statusChip.classList.toggle("chip--inactive", type !== "ok");
+}
+
+function activateReportTab(tabKey) {
+  if (!reportTabs.length || !reportPanels.length) return;
+  const target = String(tabKey || "overview").trim().toLowerCase() || "overview";
+  let resolved = target;
+  if (!reportTabs.some((button) => String(button.dataset.reportTab || "").trim().toLowerCase() === target)) {
+    resolved = String(reportTabs[0]?.dataset.reportTab || "overview").trim().toLowerCase() || "overview";
+  }
+  reportTabs.forEach((button) => {
+    const isActive = String(button.dataset.reportTab || "").trim().toLowerCase() === resolved;
+    button.classList.toggle("is-active", isActive);
+    button.setAttribute("aria-selected", isActive ? "true" : "false");
+  });
+  reportPanels.forEach((panel) => {
+    const isActive = String(panel.dataset.reportPanel || "").trim().toLowerCase() === resolved;
+    panel.classList.toggle("is-active", isActive);
+    panel.hidden = !isActive;
+  });
+  try {
+    window.sessionStorage?.setItem("itemtracker.pickingReportsTab", resolved);
+  } catch (_error) {
+    // ignore storage failures
+  }
 }
 
 function syncModeUi() {
@@ -480,8 +506,16 @@ function renderHighLevelSkus(reports) {
 
 function renderReplenishment(reports) {
   if (!replenishmentWrap) return;
+  const meta = reports?.meta || {};
   const summary = reports?.replenishment?.summary || {};
   const rows = Array.isArray(reports?.replenishment?.locations) ? reports.replenishment.locations : [];
+  const warehouseSnapshotDate = meta.warehouse_snapshot_date || "unknown date";
+  const maxBinQtyReady = Boolean(meta.warehouse_supports_max_bin_qty);
+  const noteHtml = maxBinQtyReady
+    ? (summary.locations_missing_max || 0) > 0
+      ? `<p class="reports-inline-note">Some replenishment rows still do not have <strong>Max. Bin Qty</strong> in the current warehouse snapshot from ${escapeHtml(warehouseSnapshotDate)}.</p>`
+      : ""
+    : `<p class="reports-inline-note">The current warehouse snapshot from <strong>${escapeHtml(warehouseSnapshotDate)}</strong> does not include <strong>Max. Bin Qty</strong> yet. Run <code>PI-App</code> again so it republishes the warehouse snapshot with <code>BLMAXQ</code>.</p>`;
   const summaryHtml = `
     <div class="reports-summary-wrap" style="margin-bottom:1rem;">
       <article class="reports-summary-card__item">
@@ -516,7 +550,7 @@ function renderReplenishment(reports) {
       { label: "SKU", render: (row) => escapeHtml(row.sku || "-") },
       { label: "Level", render: (row) => escapeHtml(row.level || "-") },
       { label: "Bin size", render: (row) => escapeHtml(row.bin_size || "-") },
-      { label: "Max. Bin Qty", render: (row) => row.max_bin_qty ? formatInteger(row.max_bin_qty) : "Missing" },
+      { label: "Max. Bin Qty", render: (row) => row.max_bin_qty ? formatInteger(row.max_bin_qty) : "Not in snapshot" },
       { label: "Pick Qty", render: (row) => formatInteger(row.pick_qty || 0) },
       { label: "Pick Count", render: (row) => formatInteger(row.pick_count || 0) },
       { label: "Est. Replenishments", render: (row) => formatInteger(row.estimated_replenishments || 0) }
@@ -524,7 +558,7 @@ function renderReplenishment(reports) {
     "No replenishment estimate rows are available for the selected range."
   );
 
-  replenishmentWrap.innerHTML = `${summaryHtml}${tableHost.innerHTML}`;
+  replenishmentWrap.innerHTML = `${noteHtml}${summaryHtml}${tableHost.innerHTML}`;
 }
 
 function renderDailyBreakdown(reports) {
@@ -622,6 +656,11 @@ async function loadReports() {
 }
 
 function wireEvents() {
+  reportTabs.forEach((button) => {
+    button.addEventListener("click", () => {
+      activateReportTab(button.dataset.reportTab || "overview");
+    });
+  });
   modeSelect?.addEventListener("change", loadReports);
   dateSelect?.addEventListener("change", () => {
     if (String(modeSelect?.value || "latest").trim().toLowerCase() === "date") {
@@ -645,6 +684,13 @@ function wireEvents() {
 }
 
 if (modeSelect) {
+  let initialTab = "overview";
+  try {
+    initialTab = window.sessionStorage?.getItem("itemtracker.pickingReportsTab") || "overview";
+  } catch (_error) {
+    initialTab = "overview";
+  }
+  activateReportTab(initialTab);
   syncModeUi();
   wireEvents();
   loadReports();

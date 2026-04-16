@@ -1674,6 +1674,8 @@ class ItemTrackerService {
     }
 
     const warehouseLocationMap = new Map();
+    let warehouseLocationCount = 0;
+    let warehouseLocationsWithMaxBinQty = 0;
     for (const row of warehouseState?.snapshot?.rows || []) {
       const client = String(row?.BLCCOD || row?.Client || row?.client_code || "").trim().toUpperCase();
       if (targetClient && client && client !== targetClient) {
@@ -1687,7 +1689,12 @@ class ItemTrackerService {
       if (status && status !== "Y") {
         continue;
       }
+      warehouseLocationCount += 1;
       const parts = this.parseHeatmapLocation(location);
+      const maxBinQty = warehouseMaxBinQty(row);
+      if (maxBinQty > 0) {
+        warehouseLocationsWithMaxBinQty += 1;
+      }
       warehouseLocationMap.set(location, {
         location,
         aisle_prefix: parts.aisle_prefix,
@@ -1698,7 +1705,7 @@ class ItemTrackerService {
         sku: normalizeSku(row?.BLITEM || row?.["Item SKU"] || row?.sku),
         bin_size: String(row?.BLSCOD || row?.["Bin Size"] || row?.["Bin Size Code"] || row?.bin_size || "").trim().toUpperCase(),
         bin_type: warehouseBinType(row),
-        max_bin_qty: warehouseMaxBinQty(row),
+        max_bin_qty: maxBinQty,
         bin_qty: safeNumber(row?.BLQTY || row?.qty || row?.["Quantity in Bin"] || 0)
       });
     }
@@ -2219,6 +2226,10 @@ class ItemTrackerService {
       (sum, entry) => sum + Number(entry.estimated_replenishments || 0),
       0
     );
+    const warehouseSupportsMaxBinQty = warehouseLocationsWithMaxBinQty > 0;
+    const replenishmentNote = warehouseSupportsMaxBinQty
+      ? "Replenishment estimates are based on current pick-bin locations where the current warehouse SKU still matches the picked SKU and Max. Bin Qty is available."
+      : "The current warehouse snapshot does not include Max. Bin Qty yet, so replenishment rows will show as missing until PI-App republishes the warehouse snapshot with BLMAXQ.";
 
     return {
       meta: {
@@ -2236,12 +2247,15 @@ class ItemTrackerService {
         pick_missing_dates: range.missingDates,
         latest_pick_snapshot_date: range.latestAvailableDate,
         warehouse_snapshot_date: warehouseState?.meta?.snapshot_date || "",
+        warehouse_location_count: warehouseLocationCount,
+        warehouse_locations_with_max_bin_qty: warehouseLocationsWithMaxBinQty,
+        warehouse_supports_max_bin_qty: warehouseSupportsMaxBinQty,
         item_catalog_meta: catalogState?.meta || this.snapshotMeta(null, "none"),
         high_level_threshold: HIGH_LEVEL_THRESHOLD,
         sku_detail_source: "Published snapshot SKU detail",
         sku_detail_note: "SKU rankings are aggregated from the SKU detail stored inside each published pick snapshot.",
         structure_note: "Pick/bulk uses BLBKPK (B/P), bin size uses BLSCOD, and replenishment estimates use BLMAXQ when that field exists in the warehouse snapshot.",
-        replenishment_note: "Replenishment estimates are based on current pick-bin locations where the current warehouse SKU still matches the picked SKU and Max. Bin Qty is available."
+        replenishment_note: replenishmentNote
       },
       summary: {
         loaded_day_count: loadedDayCount,

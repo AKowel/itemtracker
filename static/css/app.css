@@ -2018,6 +2018,52 @@ body.lightbox-open {
   overflow: hidden;
 }
 
+.reports-tabs-card {
+  overflow: hidden;
+}
+
+.reports-tab-list {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 4px;
+}
+
+.reports-tab {
+  border: 1px solid color-mix(in srgb, var(--line) 78%, white);
+  background: linear-gradient(180deg, rgba(247, 250, 255, 0.96), rgba(233, 240, 250, 0.92));
+  color: var(--text-1);
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.15s ease, background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.reports-tab:hover {
+  transform: translateY(-1px);
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--brand) 28%, var(--line));
+  box-shadow: 0 6px 14px rgba(16, 32, 61, 0.08);
+}
+
+.reports-tab.is-active {
+  color: #fff;
+  border-color: color-mix(in srgb, var(--brand) 84%, black);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--brand) 92%, white), color-mix(in srgb, var(--brand) 78%, black));
+  box-shadow: 0 10px 24px rgba(26, 92, 168, 0.22);
+}
+
+.reports-tab-panel {
+  display: grid;
+  gap: 18px;
+}
+
+.reports-tab-panel[hidden] {
+  display: none;
+}
+
 .reports-metrics-grid {
   grid-template-columns: repeat(6, minmax(160px, 1fr));
 }
@@ -2055,6 +2101,21 @@ body.lightbox-open {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 18px;
+}
+
+.reports-inline-note {
+  margin: 0 0 14px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  border: 1px solid color-mix(in srgb, var(--brand) 20%, var(--line));
+  background: linear-gradient(180deg, rgba(248, 251, 255, 0.98), rgba(238, 245, 255, 0.92));
+  color: var(--text-1);
+  line-height: 1.55;
+}
+
+.reports-inline-note strong,
+.reports-inline-note code {
+  color: var(--text);
 }
 
 .reports-ideas-grid {
