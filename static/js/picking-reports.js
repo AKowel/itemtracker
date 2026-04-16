@@ -9,6 +9,7 @@ const startDateInput = doc?.getElementById("reportsStartDate") || null;
 const endDateInput = doc?.getElementById("reportsEndDate") || null;
 const rankBySelect = doc?.getElementById("reportsRankBySelect") || null;
 const limitSelect = doc?.getElementById("reportsLimitSelect") || null;
+const exportButton = doc?.getElementById("reportsExportButton") || null;
 const reloadButton = doc?.getElementById("reportsReloadButton") || null;
 
 const dateChip = doc?.getElementById("reportsDateChip") || null;
@@ -38,6 +39,16 @@ async function apiFetch(url) {
     throw new Error(data.error || "Request failed");
   }
   return data;
+}
+
+async function readErrorMessage(response, fallbackMessage) {
+  const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+  if (contentType.includes("application/json")) {
+    const data = await response.json().catch(() => ({}));
+    return data.error || fallbackMessage;
+  }
+  const text = await response.text().catch(() => "");
+  return text || fallbackMessage;
 }
 
 function escapeHtml(value) {
@@ -137,6 +148,54 @@ function buildReportsQuery() {
   }
 
   return `?${params.toString()}`;
+}
+
+function parseDownloadFilename(disposition, fallback = "picking-reports.xlsx") {
+  const utfMatch = String(disposition || "").match(/filename\*=UTF-8''([^;]+)/i);
+  if (utfMatch?.[1]) {
+    try {
+      return decodeURIComponent(utfMatch[1]);
+    } catch (_error) {
+      return utfMatch[1];
+    }
+  }
+  const basicMatch = String(disposition || "").match(/filename="?([^"]+)"?/i);
+  return basicMatch?.[1] || fallback;
+}
+
+async function exportReportsWorkbook() {
+  if (!exportButton) return;
+
+  const originalLabel = exportButton.textContent || "Export Excel";
+  exportButton.disabled = true;
+  exportButton.textContent = "Exporting...";
+
+  try {
+    const response = await fetch(`/api/admin/picking-reports/export.xlsx${buildReportsQuery()}`);
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response, "Could not export the picking reports."));
+    }
+
+    const filename = parseDownloadFilename(
+      response.headers.get("content-disposition"),
+      "picking-reports.xlsx"
+    );
+    const blob = await response.blob();
+    const objectUrl = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(objectUrl), 1000);
+    window.ItemTracker?.toast("Excel export downloaded", "success");
+  } catch (error) {
+    window.ItemTracker?.toast(error.message || "Could not export the picking reports", "error");
+  } finally {
+    exportButton.disabled = false;
+    exportButton.textContent = originalLabel;
+  }
 }
 
 function renderTable(wrapper, rows, columns, emptyMessage) {
@@ -428,6 +487,7 @@ function wireEvents() {
   });
   rankBySelect?.addEventListener("change", loadReports);
   limitSelect?.addEventListener("change", loadReports);
+  exportButton?.addEventListener("click", exportReportsWorkbook);
   reloadButton?.addEventListener("click", loadReports);
 }
 

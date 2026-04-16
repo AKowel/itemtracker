@@ -639,6 +639,25 @@ async function createApp() {
   );
 
   app.get(
+    "/api/admin/picking-reports/export.xlsx",
+    requireAdminApi,
+    asyncHandler(async (req, res) => {
+      const exported = await service.exportPickingReportsWorkbook(undefined, {
+        mode: String(req.query.mode || "").trim(),
+        snapshotDate: String(req.query.date || "").trim(),
+        startDate: String(req.query.start || "").trim(),
+        endDate: String(req.query.end || "").trim(),
+        rankBy: String(req.query.rankBy || "").trim(),
+        limit: String(req.query.limit || "").trim()
+      });
+      res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+      res.setHeader("Content-Disposition", `attachment; filename="${exported.filename}"`);
+      res.setHeader("Cache-Control", "no-store");
+      return res.send(exported.buffer);
+    })
+  );
+
+  app.get(
     "/api/admin/sessions",
     requireAdminApi,
     (req, res) => {

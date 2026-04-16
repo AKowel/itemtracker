@@ -112,6 +112,132 @@ function normalizeExcelCellValue(value) {
   return value;
 }
 
+function normalizeWorksheetName(value, fallback = "Sheet") {
+  const text = String(value || "")
+    .replace(/[\[\]*?:/\\]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return (text || fallback).slice(0, 31);
+}
+
+function excelColumnLetter(index) {
+  let current = Number(index || 0);
+  let output = "";
+  while (current > 0) {
+    const remainder = (current - 1) % 26;
+    output = String.fromCharCode(65 + remainder) + output;
+    current = Math.floor((current - 1) / 26);
+  }
+  return output || "A";
+}
+
+function fitWorksheetColumns(worksheet, columnDefs = []) {
+  worksheet.columns.forEach((column, index) => {
+    const definition = columnDefs[index] || {};
+    let width = Math.max(8, Number(definition.width || 0));
+    column.eachCell({ includeEmpty: true }, (cell) => {
+      const text = String(normalizeExcelCellValue(cell.value) || "");
+      const longestLine = text.split(/\r?\n/).reduce((max, line) => Math.max(max, line.length), 0);
+      width = Math.max(width, longestLine + 2);
+    });
+    column.width = Math.min(Number(definition.maxWidth || 42), Math.max(Number(definition.minWidth || 12), width || 12));
+  });
+}
+
+function styleWorksheet(worksheet, columnDefs = []) {
+  const columnCount = Math.max(1, columnDefs.length);
+  worksheet.views = [{ state: "frozen", ySplit: 1 }];
+  worksheet.autoFilter = {
+    from: "A1",
+    to: `${excelColumnLetter(columnCount)}1`
+  };
+
+  const headerRow = worksheet.getRow(1);
+  headerRow.height = 22;
+  headerRow.eachCell((cell) => {
+    cell.font = { bold: true, color: { argb: "FFFFFFFF" } };
+    cell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "FF2E5B7A" }
+    };
+    cell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+    cell.border = {
+      top: { style: "thin", color: { argb: "FFD6DEE6" } },
+      left: { style: "thin", color: { argb: "FFD6DEE6" } },
+      bottom: { style: "thin", color: { argb: "FFD6DEE6" } },
+      right: { style: "thin", color: { argb: "FFD6DEE6" } }
+    };
+  });
+
+  worksheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+    if (rowNumber === 1) {
+      return;
+    }
+    row.eachCell((cell, columnNumber) => {
+      const definition = columnDefs[columnNumber - 1] || {};
+      cell.alignment = definition.alignment || { vertical: "top", wrapText: true };
+      cell.border = {
+        top: { style: "thin", color: { argb: "FFE7ECF1" } },
+        left: { style: "thin", color: { argb: "FFE7ECF1" } },
+        bottom: { style: "thin", color: { argb: "FFE7ECF1" } },
+        right: { style: "thin", color: { argb: "FFE7ECF1" } }
+      };
+      if (rowNumber % 2 === 0) {
+        cell.fill = {
+          type: "pattern",
+          pattern: "solid",
+          fgColor: { argb: "FFF8FAFC" }
+        };
+      }
+    });
+  });
+
+  columnDefs.forEach((definition, index) => {
+    const column = worksheet.getColumn(index + 1);
+    if (definition.numFmt) {
+      column.numFmt = definition.numFmt;
+    }
+  });
+
+  fitWorksheetColumns(worksheet, columnDefs);
+}
+
+function addWorksheetTable(workbook, sheetName, columns, rows, emptyMessage = "No rows to export.") {
+  const worksheet = workbook.addWorksheet(normalizeWorksheetName(sheetName));
+  worksheet.columns = columns.map((column) => ({
+    header: column.header,
+    key: column.key
+  }));
+
+  if (Array.isArray(rows) && rows.length) {
+    rows.forEach((row, index) => {
+      const values = {};
+      columns.forEach((column) => {
+        const rawValue = typeof column.value === "function"
+          ? column.value(row, index)
+          : row?.[column.key];
+        values[column.key] = normalizeExcelCellValue(rawValue);
+      });
+      worksheet.addRow(values);
+    });
+  } else {
+    const firstKey = columns[0]?.key || "value";
+    const row = {};
+    row[firstKey] = emptyMessage;
+    worksheet.addRow(row);
+    if (columns.length > 1) {
+      worksheet.mergeCells(2, 1, 2, columns.length);
+    }
+    const emptyCell = worksheet.getCell(2, 1);
+    emptyCell.font = { italic: true, color: { argb: "FF5C6B79" } };
+    emptyCell.alignment = { vertical: "middle", horizontal: "center", wrapText: true };
+  }
+
+  styleWorksheet(worksheet, columns);
+  return worksheet;
+}
+
 function recordFileName(record, fieldName) {
   const value = record?.[fieldName];
   if (Array.isArray(value)) {
@@ -1722,6 +1848,205 @@ class ItemTrackerService {
       sku_outliers: buildOutlierRows(topSkus, rankBy, 16),
       location_outliers: buildOutlierRows(topLocations, rankBy, 16),
       daily_breakdown: dailyBreakdown
+    };
+  }
+
+  async exportPickingReportsWorkbook(clientCode = DEFAULT_CLIENT_CODE, options = {}) {
+    const reports = await this.getPickingReports(clientCode, options);
+    const workbook = new ExcelJS.Workbook();
+    const meta = reports?.meta || {};
+    const summary = reports?.summary || {};
+    const requestedStart = String(meta.pick_requested_start_date || meta.latest_pick_snapshot_date || "no-start").trim() || "no-start";
+    const requestedEnd = String(meta.pick_requested_end_date || requestedStart || "no-end").trim() || "no-end";
+    const sortMetric = String(meta.sort_metric || "pick_count").trim() || "pick_count";
+    const missingDates = Array.isArray(meta.pick_missing_dates) ? meta.pick_missing_dates.filter(Boolean) : [];
+    const loadedDates = Array.isArray(meta.pick_loaded_dates) ? meta.pick_loaded_dates.filter(Boolean) : [];
+    const availableDates = Array.isArray(meta.available_pick_dates) ? meta.available_pick_dates.filter(Boolean) : [];
+
+    workbook.creator = this.config.appName || "ItemTracker";
+    workbook.created = new Date();
+    workbook.modified = new Date();
+    workbook.subject = "Picking reports export";
+    workbook.title = "Picking reports";
+    workbook.company = this.config.appName || "ItemTracker";
+
+    addWorksheetTable(
+      workbook,
+      "Metrics",
+      [
+        { header: "Metric", key: "metric", width: 30 },
+        { header: "Value", key: "value", width: 22, minWidth: 16 }
+      ],
+      [
+        { metric: "Client code", value: meta.client_code || "" },
+        { metric: "Loaded day count", value: Number(summary.loaded_day_count || 0) },
+        { metric: "Total picks", value: Number(summary.total_pick_count || 0) },
+        { metric: "Total quantity", value: safeNumber(summary.total_pick_qty || 0) },
+        { metric: "Active SKUs", value: Number(summary.active_sku_count || 0) },
+        { metric: "Active locations", value: Number(summary.active_location_count || 0) },
+        { metric: "Active aisles", value: Number(summary.active_aisle_count || 0) },
+        { metric: "Average qty per pick", value: safeNumber(summary.avg_qty_per_pick || 0) },
+        { metric: "Average picks per day", value: safeNumber(summary.avg_picks_per_day || 0) },
+        { metric: "Average qty per day", value: safeNumber(summary.avg_qty_per_day || 0) },
+        { metric: "Average picks per active SKU", value: safeNumber(summary.avg_picks_per_active_sku || 0) },
+        { metric: "Average picks per active location", value: safeNumber(summary.avg_picks_per_active_location || 0) },
+        { metric: "Peak day", value: summary.peak_day_date || "" },
+        { metric: "Peak day pick count", value: Number(summary.peak_day_pick_count || 0) },
+        { metric: "Peak day pick quantity", value: safeNumber(summary.peak_day_pick_qty || 0) }
+      ]
+    );
+
+    addWorksheetTable(
+      workbook,
+      "Coverage",
+      [
+        { header: "Metric", key: "metric", width: 34 },
+        { header: "Value", key: "value", width: 40, maxWidth: 80 }
+      ],
+      [
+        { metric: "Report type", value: meta.report_type || "picking" },
+        { metric: "Sort metric", value: sortMetric },
+        { metric: "Top SKU limit", value: Number(meta.limit || 0) },
+        { metric: "Range mode", value: meta.pick_range_mode || "" },
+        { metric: "Requested start date", value: meta.pick_requested_start_date || "" },
+        { metric: "Requested end date", value: meta.pick_requested_end_date || "" },
+        { metric: "Requested day count", value: Number(meta.pick_requested_day_count || 0) },
+        { metric: "Loaded day count", value: Number(meta.pick_available_day_count || 0) },
+        { metric: "Latest available snapshot", value: meta.latest_pick_snapshot_date || "" },
+        { metric: "Missing day count", value: missingDates.length },
+        { metric: "Missing days", value: missingDates.join(", ") || "None" },
+        { metric: "Loaded dates", value: loadedDates.join(", ") || "None" },
+        { metric: "Available dates", value: availableDates.join(", ") || "None" },
+        { metric: "SKU detail source", value: meta.sku_detail_source || "" },
+        { metric: "SKU detail note", value: meta.sku_detail_note || "" },
+        { metric: "Item catalog snapshot date", value: meta.item_catalog_meta?.snapshot_date || "" },
+        { metric: "Item catalog uploaded at", value: meta.item_catalog_meta?.uploaded_at || "" }
+      ]
+    );
+
+    addWorksheetTable(
+      workbook,
+      "Top SKUs",
+      [
+        { header: "Rank", key: "rank", width: 10, value: (_row, index) => index + 1, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "SKU", key: "sku", width: 18 },
+        { header: "Description", key: "description", width: 36, maxWidth: 60 },
+        { header: "Pick count", key: "pick_count", width: 14, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Pick quantity", key: "pick_qty", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Day count", key: "day_count", width: 12, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Location count", key: "location_count", width: 14, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Aisle count", key: "aisle_count", width: 12, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Avg qty per pick", key: "avg_qty_per_pick", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Share of picks (%)", key: "share_of_picks", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.0" }
+      ],
+      reports?.top_skus || [],
+      "No SKU activity matches the selected range."
+    );
+
+    addWorksheetTable(
+      workbook,
+      "SKU Outliers",
+      [
+        { header: "Rank", key: "rank", width: 10, value: (_row, index) => index + 1, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "SKU", key: "sku", width: 18 },
+        { header: "Description", key: "description", width: 36, maxWidth: 60 },
+        { header: "Pick count", key: "pick_count", width: 14, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Pick quantity", key: "pick_qty", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Day count", key: "day_count", width: 12, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Location count", key: "location_count", width: 14, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Aisle count", key: "aisle_count", width: 12, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Avg qty per pick", key: "avg_qty_per_pick", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Outlier score", key: "outlier_score", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Outlier threshold", key: "outlier_threshold", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" }
+      ],
+      reports?.sku_outliers || [],
+      "No SKU outliers were found for the selected range."
+    );
+
+    addWorksheetTable(
+      workbook,
+      "Location Outliers",
+      [
+        { header: "Rank", key: "rank", width: 10, value: (_row, index) => index + 1, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Location", key: "location", width: 18 },
+        { header: "Aisle", key: "aisle_prefix", width: 10 },
+        { header: "Bay", key: "bay", width: 10 },
+        { header: "Level", key: "level", width: 10 },
+        { header: "Slot", key: "slot", width: 10 },
+        { header: "Pick count", key: "pick_count", width: 14, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Pick quantity", key: "pick_qty", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Day count", key: "day_count", width: 12, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "SKU count", key: "sku_count", width: 12, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Avg qty per pick", key: "avg_qty_per_pick", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Outlier score", key: "outlier_score", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Outlier threshold", key: "outlier_threshold", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" }
+      ],
+      reports?.location_outliers || [],
+      "No location outliers were found for the selected range."
+    );
+
+    addWorksheetTable(
+      workbook,
+      "Top Locations",
+      [
+        { header: "Rank", key: "rank", width: 10, value: (_row, index) => index + 1, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Location", key: "location", width: 18 },
+        { header: "Aisle", key: "aisle_prefix", width: 10 },
+        { header: "Bay", key: "bay", width: 10 },
+        { header: "Level", key: "level", width: 10 },
+        { header: "Slot", key: "slot", width: 10 },
+        { header: "Pick count", key: "pick_count", width: 14, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Pick quantity", key: "pick_qty", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Day count", key: "day_count", width: 12, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "SKU count", key: "sku_count", width: 12, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Avg qty per pick", key: "avg_qty_per_pick", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" }
+      ],
+      reports?.top_locations || [],
+      "No location activity matches the selected range."
+    );
+
+    addWorksheetTable(
+      workbook,
+      "Top Aisles",
+      [
+        { header: "Rank", key: "rank", width: 10, value: (_row, index) => index + 1, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Aisle", key: "aisle_prefix", width: 12 },
+        { header: "Pick count", key: "pick_count", width: 14, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Pick quantity", key: "pick_qty", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Day count", key: "day_count", width: 12, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Location count", key: "location_count", width: 14, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "SKU count", key: "sku_count", width: 12, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Avg qty per pick", key: "avg_qty_per_pick", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" }
+      ],
+      reports?.top_aisles || [],
+      "No aisle activity matches the selected range."
+    );
+
+    addWorksheetTable(
+      workbook,
+      "Daily Breakdown",
+      [
+        { header: "Date", key: "date", width: 14 },
+        { header: "Pick count", key: "pick_count", width: 14, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Pick quantity", key: "pick_qty", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Location count", key: "location_count", width: 14, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Aisle count", key: "aisle_count", width: 12, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "SKU count", key: "sku_count", width: 12, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Avg qty per pick", key: "avg_qty_per_pick", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" }
+      ],
+      reports?.daily_breakdown || [],
+      "No daily snapshot rows are available for the selected range."
+    );
+
+    const filename = safeFilename(
+      `picking-reports-${requestedStart}-to-${requestedEnd}-${sortMetric}.xlsx`,
+      "picking-reports.xlsx"
+    );
+
+    return {
+      filename,
+      buffer: Buffer.from(await workbook.xlsx.writeBuffer()),
+      reports
     };
   }
 
