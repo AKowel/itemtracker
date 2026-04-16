@@ -7,10 +7,32 @@ const { config } = require("./config");
 const { safeJson } = require("./helpers");
 const { ItemTrackerService, MAX_RESULTS, PocketBaseError } = require("./itemTrackerService");
 
+const TRACKER_CLIENT_CHOICES = Object.freeze([
+  { code: "FANDMKET", name: "Fortnum & Mason" },
+  { code: "WESTLAND", name: "Westland" }
+]);
+
 function asyncHandler(handler) {
   return (req, res, next) => {
     Promise.resolve(handler(req, res, next)).catch(next);
   };
+}
+
+function normalizeClientCode(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]/g, "");
+}
+
+function getTrackerClientChoices() {
+  return TRACKER_CLIENT_CHOICES.map((item) => ({ ...item }));
+}
+
+function resolveTrackerClient(value) {
+  const requested = normalizeClientCode(value);
+  const matched = TRACKER_CLIENT_CHOICES.find((item) => item.code === requested);
+  return matched?.code || TRACKER_CLIENT_CHOICES[0].code;
 }
 
 function setFlash(req, category, message) {
@@ -582,8 +604,12 @@ async function createApp() {
     "/picking-heatmap",
     requireAdminPage,
     asyncHandler(async (req, res) => {
+      const clientChoices = getTrackerClientChoices();
+      const selectedClient = resolveTrackerClient(req.query.client);
       return res.render("heatmap", {
-        pageTitle: `Picking Heatmap | ${config.appName}`
+        pageTitle: `Picking Heatmap | ${config.appName}`,
+        clientChoices,
+        selectedClient
       });
     })
   );
@@ -592,8 +618,12 @@ async function createApp() {
     "/picking-reports",
     requireAdminPage,
     asyncHandler(async (req, res) => {
+      const clientChoices = getTrackerClientChoices();
+      const selectedClient = resolveTrackerClient(req.query.client);
       return res.render("picking-reports", {
-        pageTitle: `Picking Reports | ${config.appName}`
+        pageTitle: `Picking Reports | ${config.appName}`,
+        clientChoices,
+        selectedClient
       });
     })
   );
@@ -612,7 +642,8 @@ async function createApp() {
     "/api/admin/picking-heatmap",
     requireAdminApi,
     asyncHandler(async (req, res) => {
-      const heatmap = await service.getPickingHeatmap(undefined, {
+      const targetClient = resolveTrackerClient(req.query.client);
+      const heatmap = await service.getPickingHeatmap(targetClient, {
         mode: String(req.query.mode || "").trim(),
         snapshotDate: String(req.query.date || "").trim(),
         startDate: String(req.query.start || "").trim(),
@@ -626,7 +657,8 @@ async function createApp() {
     "/api/admin/picking-reports",
     requireAdminApi,
     asyncHandler(async (req, res) => {
-      const reports = await service.getPickingReports(undefined, {
+      const targetClient = resolveTrackerClient(req.query.client);
+      const reports = await service.getPickingReports(targetClient, {
         mode: String(req.query.mode || "").trim(),
         snapshotDate: String(req.query.date || "").trim(),
         startDate: String(req.query.start || "").trim(),
@@ -642,7 +674,8 @@ async function createApp() {
     "/api/admin/picking-reports/export.xlsx",
     requireAdminApi,
     asyncHandler(async (req, res) => {
-      const exported = await service.exportPickingReportsWorkbook(undefined, {
+      const targetClient = resolveTrackerClient(req.query.client);
+      const exported = await service.exportPickingReportsWorkbook(targetClient, {
         mode: String(req.query.mode || "").trim(),
         snapshotDate: String(req.query.date || "").trim(),
         startDate: String(req.query.start || "").trim(),

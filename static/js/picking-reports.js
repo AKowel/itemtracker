@@ -1,5 +1,6 @@
 const doc = typeof document !== "undefined" ? document : null;
 
+const clientSelect = doc?.getElementById("reportsClientSelect") || null;
 const modeSelect = doc?.getElementById("reportsModeSelect") || null;
 const dateField = doc?.getElementById("reportsDateField") || null;
 const dateSelect = doc?.getElementById("reportsDateSelect") || null;
@@ -13,6 +14,7 @@ const exportButton = doc?.getElementById("reportsExportButton") || null;
 const reloadButton = doc?.getElementById("reportsReloadButton") || null;
 const reportTabs = Array.from(doc?.querySelectorAll("[data-report-tab]") || []);
 const reportPanels = Array.from(doc?.querySelectorAll("[data-report-panel]") || []);
+const clientAwareLinks = Array.from(doc?.querySelectorAll("[data-client-aware-link]") || []);
 
 const dateChip = doc?.getElementById("reportsDateChip") || null;
 const coverageChip = doc?.getElementById("reportsCoverageChip") || null;
@@ -50,6 +52,43 @@ async function apiFetch(url) {
     throw new Error(data.error || "Request failed");
   }
   return data;
+}
+
+function normalizeClientCode(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]/g, "");
+}
+
+function getSelectedClient() {
+  return normalizeClientCode(clientSelect?.value || "FANDMKET") || "FANDMKET";
+}
+
+function updateClientAwareLinks() {
+  if (!clientAwareLinks.length || typeof window === "undefined") return;
+  const selectedClient = getSelectedClient();
+  clientAwareLinks.forEach((link) => {
+    const href = String(link.getAttribute("href") || "").trim();
+    if (!href) return;
+    const url = new URL(href, window.location.origin);
+    url.searchParams.set("client", selectedClient);
+    link.setAttribute("href", `${url.pathname}${url.search}${url.hash}`);
+  });
+}
+
+function syncClientUrl() {
+  if (typeof window === "undefined" || !window.history?.replaceState) return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("client", getSelectedClient());
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function navigateToSelectedClient() {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("client", getSelectedClient());
+  window.location.assign(`${url.pathname}${url.search}${url.hash}`);
 }
 
 async function readErrorMessage(response, fallbackMessage) {
@@ -161,6 +200,7 @@ function updateDateOptions(availableDates, selectedDate) {
 
 function buildReportsQuery() {
   const params = new URLSearchParams();
+  params.set("client", getSelectedClient());
   const mode = String(modeSelect?.value || "latest").trim().toLowerCase() || "latest";
   params.set("mode", mode);
   params.set("rankBy", String(rankBySelect?.value || "pick_count").trim());
@@ -661,6 +701,9 @@ function wireEvents() {
       activateReportTab(button.dataset.reportTab || "overview");
     });
   });
+  clientSelect?.addEventListener("change", () => {
+    navigateToSelectedClient();
+  });
   modeSelect?.addEventListener("change", loadReports);
   dateSelect?.addEventListener("change", () => {
     if (String(modeSelect?.value || "latest").trim().toLowerCase() === "date") {
@@ -692,6 +735,8 @@ if (modeSelect) {
   }
   activateReportTab(initialTab);
   syncModeUi();
+  updateClientAwareLinks();
+  syncClientUrl();
   wireEvents();
   loadReports();
 }

@@ -5,6 +5,7 @@ const doc = typeof document !== "undefined" ? document : null;
 const layoutRoot = doc?.getElementById("heatmapLayout") || null;
 const canvas = doc?.getElementById("heatmapCanvas") || null;
 const modeSelect = doc?.getElementById("heatmapModeSelect") || null;
+const clientSelect = doc?.getElementById("heatmapClientSelect") || null;
 const dateField = doc?.getElementById("heatmapDateField") || null;
 const dateSelect = doc?.getElementById("heatmapDateSelect") || null;
 const startField = doc?.getElementById("heatmapStartField") || null;
@@ -40,6 +41,44 @@ const legendBar = doc?.querySelector(".heatmap-legend__bar") || null;
 const legendLabels = Array.from(doc?.querySelectorAll(".heatmap-legend__labels span") || []);
 const fpsOverlay = doc?.getElementById("heatmapFpsOverlay") || null;
 const fpsModeChip = doc?.getElementById("heatmapFpsModeChip") || null;
+const clientAwareLinks = Array.from(doc?.querySelectorAll("[data-client-aware-link]") || []);
+
+function normalizeClientCode(value) {
+  return String(value || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[^A-Z0-9_]/g, "");
+}
+
+function getSelectedClient() {
+  return normalizeClientCode(clientSelect?.value || "FANDMKET") || "FANDMKET";
+}
+
+function updateClientAwareLinks() {
+  if (!clientAwareLinks.length || typeof window === "undefined") return;
+  const selectedClient = getSelectedClient();
+  clientAwareLinks.forEach((link) => {
+    const href = String(link.getAttribute("href") || "").trim();
+    if (!href) return;
+    const url = new URL(href, window.location.origin);
+    url.searchParams.set("client", selectedClient);
+    link.setAttribute("href", `${url.pathname}${url.search}${url.hash}`);
+  });
+}
+
+function syncClientUrl() {
+  if (typeof window === "undefined" || !window.history?.replaceState) return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("client", getSelectedClient());
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function navigateToSelectedClient() {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("client", getSelectedClient());
+  window.location.assign(`${url.pathname}${url.search}${url.hash}`);
+}
 
 // ── Scene settings (localStorage) ────────────────────────────────────────────
 
@@ -1682,6 +1721,7 @@ function syncModeUi() {
 
 function buildHeatmapQuery() {
   const params = new URLSearchParams();
+  params.set("client", getSelectedClient());
   const mode = String(modeSelect?.value || "latest").trim().toLowerCase() || "latest";
   params.set("mode", mode);
 
@@ -1914,6 +1954,9 @@ function handleKeyUp(event) {
 function wireEvents() {
   if (!metricSelect || !searchInput || !pickedOnlyToggle || !occupiedOnlyToggle || !reloadButton) return;
 
+  clientSelect?.addEventListener("change", () => {
+    navigateToSelectedClient();
+  });
   modeSelect?.addEventListener("change", () => {
     syncModeUi();
     loadHeatmap();
@@ -1968,6 +2011,8 @@ if (canvas) {
   wireSettingsPanel();
   initScene();
   syncModeUi();
+  updateClientAwareLinks();
+  syncClientUrl();
   refreshFullscreenState();
   wireEvents();
   loadHeatmap();

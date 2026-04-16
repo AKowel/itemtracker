@@ -2611,8 +2611,9 @@ class ItemTrackerService {
       "No daily snapshot rows are available for the selected range."
     );
 
+    const exportClientCode = String(meta.client_code || clientCode || DEFAULT_CLIENT_CODE).trim().toUpperCase() || DEFAULT_CLIENT_CODE;
     const filename = safeFilename(
-      `picking-reports-${requestedStart}-to-${requestedEnd}-${sortMetric}.xlsx`,
+      `picking-reports-${exportClientCode}-${requestedStart}-to-${requestedEnd}-${sortMetric}.xlsx`,
       "picking-reports.xlsx"
     );
 

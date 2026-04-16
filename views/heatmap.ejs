@@ -8,14 +8,18 @@
       <h1>Picking Heatmap</h1>
       <p>View live warehouse locations in 3D, colour them by pick activity, and click any location to inspect the current SKU, photos, and heat details.</p>
       <div class="hero-card__chips">
+        <span class="chip">Client: <%= selectedClient %></span>
         <span class="chip" id="heatmapDateChip">Loading snapshots...</span>
         <span class="chip" id="heatmapSnapshotStatusChip">Checking snapshot status...</span>
         <span class="chip" id="heatmapLocationChip">0 locations</span>
         <span class="chip" id="heatmapPickChip">0 picks</span>
       </div>
       <p class="heatmap-hero__actions">
-        <a href="/picking-reports" class="ghost-button">Open reports</a>
+        <a href="/picking-reports?client=<%= encodeURIComponent(selectedClient || '') %>" class="ghost-button" data-client-aware-link>Open reports</a>
       </p>
+      <% if (selectedClient !== "FANDMKET") { %>
+        <p class="admin-empty">Westland data can load now, but the 3D positioning will only be fully accurate after the Westland layout file is added.</p>
+      <% } %>
     </div>
   </section>
 
@@ -29,6 +33,14 @@
         </div>
       </div>
       <div class="heatmap-toolbar">
+        <label class="field">
+          <span>Client</span>
+          <select id="heatmapClientSelect">
+            <% (clientChoices || []).forEach((client) => { %>
+              <option value="<%= client.code %>" <%= client.code === selectedClient ? "selected" : "" %>><%= client.name %></option>
+            <% }) %>
+          </select>
+        </label>
         <label class="field">
           <span>View mode</span>
           <select id="heatmapModeSelect">

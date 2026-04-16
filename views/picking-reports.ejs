@@ -8,13 +8,14 @@
       <h1>Picking Reports</h1>
       <p>Track the busiest SKUs, aisles, and locations across published pick snapshots, then spot the days and outliers worth acting on.</p>
       <div class="hero-card__chips">
+        <span class="chip">Client: <%= selectedClient %></span>
         <span class="chip" id="reportsDateChip">Loading range...</span>
         <span class="chip" id="reportsCoverageChip">Checking snapshot coverage...</span>
         <span class="chip" id="reportsPeakDayChip">Finding peak day...</span>
         <span class="chip chip--inactive" id="reportsStatusChip">Loading...</span>
       </div>
       <div class="reports-hero__actions">
-        <a href="/picking-heatmap" class="ghost-button">Back to heatmap</a>
+        <a href="/picking-heatmap?client=<%= encodeURIComponent(selectedClient || '') %>" class="ghost-button" data-client-aware-link>Back to heatmap</a>
       </div>
     </div>
   </section>
@@ -28,6 +29,14 @@
       </div>
     </div>
     <div class="heatmap-toolbar reports-toolbar">
+      <label class="field">
+        <span>Client</span>
+        <select id="reportsClientSelect">
+          <% (clientChoices || []).forEach((client) => { %>
+            <option value="<%= client.code %>" <%= client.code === selectedClient ? "selected" : "" %>><%= client.name %></option>
+          <% }) %>
+        </select>
+      </label>
       <label class="field">
         <span>Report window</span>
         <select id="reportsModeSelect">
