@@ -105,6 +105,26 @@
       <strong id="reportsAvgPicksPerDayMetric">0</strong>
       <span>Average daily pick count across loaded days</span>
     </article>
+    <article class="metric-card">
+      <p class="eyebrow">Pick-bin picks</p>
+      <strong id="reportsPickBinPicksMetric">0</strong>
+      <span>Picks coming from locations marked as pick bins</span>
+    </article>
+    <article class="metric-card">
+      <p class="eyebrow">Bulk-bin picks</p>
+      <strong id="reportsBulkBinPicksMetric">0</strong>
+      <span>Picks coming from locations marked as bulk bins</span>
+    </article>
+    <article class="metric-card">
+      <p class="eyebrow">Level 10+ picks</p>
+      <strong id="reportsHighLevelPicksMetric">0</strong>
+      <span>Touches happening on higher levels that may need slotting review</span>
+    </article>
+    <article class="metric-card">
+      <p class="eyebrow">Est. replenishments</p>
+      <strong id="reportsEstimatedReplenishmentsMetric">0</strong>
+      <span>Estimated pick-bin refills based on Max. Bin Qty where available</span>
+    </article>
   </section>
 
   <section class="panel-card reports-summary-card">
@@ -187,6 +207,75 @@
         <p class="admin-loading">Loading...</p>
       </div>
     </section>
+  </section>
+
+  <section class="reports-two-up">
+    <section class="panel-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Level Profile</p>
+          <h2>Level Breakdown</h2>
+          <p>See how picks split across levels, including how much of each level’s workload comes from pick bins vs bulk bins.</p>
+        </div>
+      </div>
+      <div id="reportsLevelBreakdownWrap">
+        <p class="admin-loading">Loading...</p>
+      </div>
+    </section>
+
+    <section class="panel-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Pick Vs Bulk</p>
+          <h2>Bin Type Breakdown</h2>
+          <p>Useful for checking whether the current pick/bin split is doing the work you expect.</p>
+        </div>
+      </div>
+      <div id="reportsBinTypeWrap">
+        <p class="admin-loading">Loading...</p>
+      </div>
+    </section>
+  </section>
+
+  <section class="reports-two-up">
+    <section class="panel-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Bin Sizes</p>
+          <h2>Bin Size Breakdown</h2>
+          <p>Shows which size codes are handling the most picks and quantity in the selected range.</p>
+        </div>
+      </div>
+      <div id="reportsBinSizeWrap">
+        <p class="admin-loading">Loading...</p>
+      </div>
+    </section>
+
+    <section class="panel-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Slotting Candidates</p>
+          <h2>Level 10+ SKU Candidates</h2>
+          <p>High-activity SKUs still getting picked from level 10 and above, which may be the first candidates to move lower.</p>
+        </div>
+      </div>
+      <div id="reportsHighLevelSkusWrap">
+        <p class="admin-loading">Loading...</p>
+      </div>
+    </section>
+  </section>
+
+  <section class="panel-card">
+    <div class="panel-head">
+      <div>
+        <p class="eyebrow">Replenishment</p>
+        <h2>Pick Bin Replenishment Estimate</h2>
+        <p>Estimated refills from bulk into pick bins using current pick-bin SKU matches and Max. Bin Qty from the warehouse snapshot.</p>
+      </div>
+    </div>
+    <div id="reportsReplenishmentWrap">
+      <p class="admin-loading">Loading...</p>
+    </div>
   </section>
 
   <section class="panel-card">

@@ -23,6 +23,10 @@ const activeSkusMetric = doc?.getElementById("reportsActiveSkusMetric") || null;
 const activeLocationsMetric = doc?.getElementById("reportsActiveLocationsMetric") || null;
 const avgQtyPerPickMetric = doc?.getElementById("reportsAvgQtyPerPickMetric") || null;
 const avgPicksPerDayMetric = doc?.getElementById("reportsAvgPicksPerDayMetric") || null;
+const pickBinPicksMetric = doc?.getElementById("reportsPickBinPicksMetric") || null;
+const bulkBinPicksMetric = doc?.getElementById("reportsBulkBinPicksMetric") || null;
+const highLevelPicksMetric = doc?.getElementById("reportsHighLevelPicksMetric") || null;
+const estimatedReplenishmentsMetric = doc?.getElementById("reportsEstimatedReplenishmentsMetric") || null;
 
 const summaryWrap = doc?.getElementById("reportsSummaryWrap") || null;
 const topSkusWrap = doc?.getElementById("reportsTopSkusWrap") || null;
@@ -30,6 +34,11 @@ const skuOutliersWrap = doc?.getElementById("reportsSkuOutliersWrap") || null;
 const locationOutliersWrap = doc?.getElementById("reportsLocationOutliersWrap") || null;
 const topLocationsWrap = doc?.getElementById("reportsTopLocationsWrap") || null;
 const topAislesWrap = doc?.getElementById("reportsTopAislesWrap") || null;
+const levelBreakdownWrap = doc?.getElementById("reportsLevelBreakdownWrap") || null;
+const binTypeWrap = doc?.getElementById("reportsBinTypeWrap") || null;
+const binSizeWrap = doc?.getElementById("reportsBinSizeWrap") || null;
+const highLevelSkusWrap = doc?.getElementById("reportsHighLevelSkusWrap") || null;
+const replenishmentWrap = doc?.getElementById("reportsReplenishmentWrap") || null;
 const dailyWrap = doc?.getElementById("reportsDailyWrap") || null;
 
 async function apiFetch(url) {
@@ -257,6 +266,16 @@ function renderSummary(reports) {
       <strong>${escapeHtml(summary.peak_day_date || "No peak day yet")}</strong>
       <p>${formatInteger(summary.peak_day_pick_count || 0)} picks and ${formatInteger(summary.peak_day_pick_qty || 0)} units on the busiest loaded day.</p>
     </article>
+    <article class="reports-summary-card__item">
+      <span class="eyebrow">Warehouse structure</span>
+      <strong>${escapeHtml(meta.warehouse_snapshot_date || "No warehouse snapshot")}</strong>
+      <p>${escapeHtml(meta.structure_note || "Warehouse structure fields drive the level, pick/bulk, and bin-size reporting.")}</p>
+    </article>
+    <article class="reports-summary-card__item">
+      <span class="eyebrow">Replenishment note</span>
+      <strong>${escapeHtml(`Level ${meta.high_level_threshold || 10}+ watched`)}</strong>
+      <p>${escapeHtml(meta.replenishment_note || "Replenishment estimates use current pick-bin matches and Max. Bin Qty when it is available.")}</p>
+    </article>
   `;
 }
 
@@ -268,6 +287,10 @@ function renderMetrics(reports) {
   if (activeLocationsMetric) activeLocationsMetric.textContent = formatInteger(summary.active_location_count || 0);
   if (avgQtyPerPickMetric) avgQtyPerPickMetric.textContent = formatDecimal(summary.avg_qty_per_pick || 0, 2);
   if (avgPicksPerDayMetric) avgPicksPerDayMetric.textContent = formatDecimal(summary.avg_picks_per_day || 0, 1);
+  if (pickBinPicksMetric) pickBinPicksMetric.textContent = formatInteger(summary.pick_bin_pick_count || 0);
+  if (bulkBinPicksMetric) bulkBinPicksMetric.textContent = formatInteger(summary.bulk_bin_pick_count || 0);
+  if (highLevelPicksMetric) highLevelPicksMetric.textContent = formatInteger(summary.high_level_pick_count || 0);
+  if (estimatedReplenishmentsMetric) estimatedReplenishmentsMetric.textContent = formatInteger(summary.estimated_replenishment_count || 0);
 }
 
 function renderHeroChips(reports) {
@@ -384,6 +407,126 @@ function renderTopAisles(reports) {
   );
 }
 
+function renderLevelBreakdown(reports) {
+  renderTable(
+    levelBreakdownWrap,
+    Array.isArray(reports?.level_breakdown) ? reports.level_breakdown : [],
+    [
+      { label: "Level", render: (row) => `<strong>${escapeHtml(row.level || "Unknown")}</strong>` },
+      { label: "Picks", render: (row) => formatInteger(row.pick_count || 0) },
+      { label: "Qty", render: (row) => formatInteger(row.pick_qty || 0) },
+      { label: "Locations", render: (row) => formatInteger(row.location_count || 0) },
+      { label: "SKUs", render: (row) => formatInteger(row.sku_count || 0) },
+      { label: "Pick-bin picks", render: (row) => formatInteger(row.pick_bin_pick_count || 0) },
+      { label: "Bulk-bin picks", render: (row) => formatInteger(row.bulk_bin_pick_count || 0) },
+      { label: "Share", render: (row) => formatPercent(row.share_of_picks || 0, 1) }
+    ],
+    "No level activity matches the selected range."
+  );
+}
+
+function renderBinTypes(reports) {
+  renderTable(
+    binTypeWrap,
+    Array.isArray(reports?.bin_type_breakdown) ? reports.bin_type_breakdown : [],
+    [
+      { label: "Type", render: (row) => `<strong>${escapeHtml(row.bin_type || "Unknown")}</strong>` },
+      { label: "Picks", render: (row) => formatInteger(row.pick_count || 0) },
+      { label: "Qty", render: (row) => formatInteger(row.pick_qty || 0) },
+      { label: "Locations", render: (row) => formatInteger(row.location_count || 0) },
+      { label: "SKUs", render: (row) => formatInteger(row.sku_count || 0) },
+      { label: "Levels", render: (row) => formatInteger(row.level_count || 0) },
+      { label: "Share", render: (row) => formatPercent(row.share_of_picks || 0, 1) }
+    ],
+    "No pick-vs-bulk activity matches the selected range."
+  );
+}
+
+function renderBinSizes(reports) {
+  renderTable(
+    binSizeWrap,
+    Array.isArray(reports?.bin_size_breakdown) ? reports.bin_size_breakdown : [],
+    [
+      { label: "Bin size", render: (row) => `<strong>${escapeHtml(row.bin_size || "Unknown")}</strong>` },
+      { label: "Picks", render: (row) => formatInteger(row.pick_count || 0) },
+      { label: "Qty", render: (row) => formatInteger(row.pick_qty || 0) },
+      { label: "Locations", render: (row) => formatInteger(row.location_count || 0) },
+      { label: "SKUs", render: (row) => formatInteger(row.sku_count || 0) },
+      { label: "Levels", render: (row) => formatInteger(row.level_count || 0) },
+      { label: "Share", render: (row) => formatPercent(row.share_of_picks || 0, 1) }
+    ],
+    "No bin-size activity matches the selected range."
+  );
+}
+
+function renderHighLevelSkus(reports) {
+  const threshold = reports?.meta?.high_level_threshold || 10;
+  renderTable(
+    highLevelSkusWrap,
+    Array.isArray(reports?.high_level_skus) ? reports.high_level_skus : [],
+    [
+      { label: "SKU", render: (row) => `<strong>${escapeHtml(row.sku)}</strong>` },
+      { label: "Description", render: (row) => escapeHtml(row.description || "No description") },
+      { label: `Level ${threshold}+ picks`, render: (row) => formatInteger(row.high_level_pick_count || 0) },
+      { label: `Level ${threshold}+ qty`, render: (row) => formatInteger(row.high_level_pick_qty || 0) },
+      { label: "All picks", render: (row) => formatInteger(row.pick_count || 0) },
+      { label: "High-level share", render: (row) => formatPercent(row.high_level_share_of_sku_picks || 0, 1) },
+      { label: "Lowest", render: (row) => formatInteger(row.lowest_level || 0) },
+      { label: "Highest", render: (row) => formatInteger(row.highest_level || 0) }
+    ],
+    `No SKU activity was found on level ${threshold}+ for the selected range.`
+  );
+}
+
+function renderReplenishment(reports) {
+  if (!replenishmentWrap) return;
+  const summary = reports?.replenishment?.summary || {};
+  const rows = Array.isArray(reports?.replenishment?.locations) ? reports.replenishment.locations : [];
+  const summaryHtml = `
+    <div class="reports-summary-wrap" style="margin-bottom:1rem;">
+      <article class="reports-summary-card__item">
+        <span class="eyebrow">Estimated replenishments</span>
+        <strong>${formatInteger(summary.estimated_replenishment_count || 0)}</strong>
+        <p>Refill estimate based on current pick-bin matches and Max. Bin Qty.</p>
+      </article>
+      <article class="reports-summary-card__item">
+        <span class="eyebrow">Tracked locations</span>
+        <strong>${formatInteger(summary.location_count || 0)}</strong>
+        <p>Pick-bin SKU locations matched against the current warehouse snapshot.</p>
+      </article>
+      <article class="reports-summary-card__item">
+        <span class="eyebrow">With Max. Bin Qty</span>
+        <strong>${formatInteger(summary.locations_with_max || 0)}</strong>
+        <p>These rows have the capacity figure needed for a real replenishment estimate.</p>
+      </article>
+      <article class="reports-summary-card__item">
+        <span class="eyebrow">Missing Max. Bin Qty</span>
+        <strong>${formatInteger(summary.locations_missing_max || 0)}</strong>
+        <p>These rows are tracked, but need the upstream warehouse snapshot to include Max. Bin Qty before they can be estimated.</p>
+      </article>
+    </div>
+  `;
+
+  const tableHost = document.createElement("div");
+  renderTable(
+    tableHost,
+    rows,
+    [
+      { label: "Location", render: (row) => `<strong>${escapeHtml(row.location)}</strong>` },
+      { label: "SKU", render: (row) => escapeHtml(row.sku || "-") },
+      { label: "Level", render: (row) => escapeHtml(row.level || "-") },
+      { label: "Bin size", render: (row) => escapeHtml(row.bin_size || "-") },
+      { label: "Max. Bin Qty", render: (row) => row.max_bin_qty ? formatInteger(row.max_bin_qty) : "Missing" },
+      { label: "Pick Qty", render: (row) => formatInteger(row.pick_qty || 0) },
+      { label: "Pick Count", render: (row) => formatInteger(row.pick_count || 0) },
+      { label: "Est. Replenishments", render: (row) => formatInteger(row.estimated_replenishments || 0) }
+    ],
+    "No replenishment estimate rows are available for the selected range."
+  );
+
+  replenishmentWrap.innerHTML = `${summaryHtml}${tableHost.innerHTML}`;
+}
+
 function renderDailyBreakdown(reports) {
   renderTable(
     dailyWrap,
@@ -410,6 +553,11 @@ function renderReports(reports) {
   renderLocationOutliers(reports);
   renderTopLocations(reports);
   renderTopAisles(reports);
+  renderLevelBreakdown(reports);
+  renderBinTypes(reports);
+  renderBinSizes(reports);
+  renderHighLevelSkus(reports);
+  renderReplenishment(reports);
   renderDailyBreakdown(reports);
 }
 
@@ -428,6 +576,11 @@ async function loadReports() {
       top_aisles: [],
       sku_outliers: [],
       location_outliers: [],
+      level_breakdown: [],
+      bin_type_breakdown: [],
+      bin_size_breakdown: [],
+      high_level_skus: [],
+      replenishment: { summary: {}, locations: [] },
       daily_breakdown: []
     };
     const meta = reports.meta || {};
@@ -459,7 +612,7 @@ async function loadReports() {
     if (summaryWrap) {
       summaryWrap.innerHTML = `<p class="admin-empty">${escapeHtml(error.message || "Could not load the reports.")}</p>`;
     }
-    [topSkusWrap, skuOutliersWrap, locationOutliersWrap, topLocationsWrap, topAislesWrap, dailyWrap].forEach((wrapper) => {
+    [topSkusWrap, skuOutliersWrap, locationOutliersWrap, topLocationsWrap, topAislesWrap, levelBreakdownWrap, binTypeWrap, binSizeWrap, highLevelSkusWrap, replenishmentWrap, dailyWrap].forEach((wrapper) => {
       if (wrapper) {
         wrapper.innerHTML = '<p class="admin-empty">Could not load this report section.</p>';
       }
