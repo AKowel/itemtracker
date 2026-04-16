@@ -19,91 +19,92 @@
     </div>
   </section>
 
-  <section class="panel-card heatmap-toolbar-card">
-    <div class="panel-head">
-      <div>
-        <p class="eyebrow">Controls</p>
-        <h2>Scene Filters</h2>
-        <p>Choose a published pick day or range and narrow the scene to the most useful locations.</p>
-      </div>
-    </div>
-    <div class="heatmap-toolbar">
-      <label class="field">
-        <span>View mode</span>
-        <select id="heatmapModeSelect">
-          <option value="latest">Latest day</option>
-          <option value="date">Specific date</option>
-          <option value="last_7">Last week</option>
-          <option value="last_30">Last month</option>
-          <option value="custom">Custom range</option>
-        </select>
-      </label>
-      <label class="field" id="heatmapDateField" hidden>
-        <span>Pick snapshot date</span>
-        <select id="heatmapDateSelect">
-          <option value="">No snapshots yet</option>
-        </select>
-      </label>
-      <label class="field" id="heatmapStartField" hidden>
-        <span>Start date</span>
-        <input type="date" id="heatmapStartDate">
-      </label>
-      <label class="field" id="heatmapEndField" hidden>
-        <span>End date</span>
-        <input type="date" id="heatmapEndDate">
-      </label>
-      <label class="field">
-        <span>Heat metric</span>
-        <select id="heatmapMetricSelect">
-          <option value="pick_count">Pick count</option>
-          <option value="pick_qty">Pick quantity</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>Camera</span>
-        <select id="heatmapCameraModeSelect">
-          <option value="orbit">Perspective</option>
-          <option value="top">Top-down</option>
-          <option value="fps">FPS walk-through</option>
-        </select>
-      </label>
-      <label class="field">
-        <span>Colour mode</span>
-        <select id="heatmapColourModeSelect">
-          <option value="heatmap">Heatmap activity</option>
-          <option value="binsize">Bin size</option>
-          <option value="zone">Zone</option>
-          <option value="level">Level</option>
-        </select>
-      </label>
-      <label class="field heatmap-level-filter-field">
-        <span>Visible levels</span>
-        <div class="heatmap-level-filter">
-          <input type="number" id="heatmapLevelMin" min="0" max="99" placeholder="Min">
-          <span>to</span>
-          <input type="number" id="heatmapLevelMax" min="0" max="99" placeholder="Max">
-          <button type="button" class="ghost-button heatmap-level-reset" id="heatmapLevelResetButton">All</button>
+  <section class="heatmap-fullscreen-shell" id="heatmapLayout">
+    <section class="panel-card heatmap-toolbar-card">
+      <div class="panel-head">
+        <div>
+          <p class="eyebrow">Controls</p>
+          <h2>Scene Filters</h2>
+          <p>Choose a published pick day or range and narrow the scene to the most useful locations.</p>
         </div>
-      </label>
-      <label class="field">
-        <span>Find location or SKU</span>
-        <input type="search" id="heatmapSearchInput" placeholder="WF441002 or SKU">
-      </label>
-      <label class="toggle-pill">
-        <input type="checkbox" id="heatmapPickedOnly">
-        <span>Only picked locations</span>
-      </label>
-      <label class="toggle-pill">
-        <input type="checkbox" id="heatmapOccupiedOnly">
-        <span>Only occupied locations</span>
-      </label>
-      <button type="button" class="ghost-button" id="heatmapResetCameraButton">Reset camera</button>
-      <button type="button" id="heatmapReloadButton">Reload</button>
-    </div>
-  </section>
+      </div>
+      <div class="heatmap-toolbar">
+        <label class="field">
+          <span>View mode</span>
+          <select id="heatmapModeSelect">
+            <option value="latest">Latest day</option>
+            <option value="date">Specific date</option>
+            <option value="last_7">Last week</option>
+            <option value="last_30">Last month</option>
+            <option value="custom">Custom range</option>
+          </select>
+        </label>
+        <label class="field" id="heatmapDateField" hidden>
+          <span>Pick snapshot date</span>
+          <select id="heatmapDateSelect">
+            <option value="">No snapshots yet</option>
+          </select>
+        </label>
+        <label class="field" id="heatmapStartField" hidden>
+          <span>Start date</span>
+          <input type="date" id="heatmapStartDate">
+        </label>
+        <label class="field" id="heatmapEndField" hidden>
+          <span>End date</span>
+          <input type="date" id="heatmapEndDate">
+        </label>
+        <label class="field">
+          <span>Heat metric</span>
+          <select id="heatmapMetricSelect">
+            <option value="pick_count">Pick count</option>
+            <option value="pick_qty">Pick quantity</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Camera</span>
+          <select id="heatmapCameraModeSelect">
+            <option value="orbit">Perspective</option>
+            <option value="top">Top-down</option>
+            <option value="fps">FPS walk-through</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>Colour mode</span>
+          <select id="heatmapColourModeSelect">
+            <option value="heatmap">Heatmap activity</option>
+            <option value="binsize">Bin size</option>
+            <option value="zone">Zone</option>
+            <option value="level">Level</option>
+          </select>
+        </label>
+        <label class="field heatmap-level-filter-field">
+          <span>Visible levels</span>
+          <div class="heatmap-level-filter">
+            <input type="number" id="heatmapLevelMin" min="0" max="99" placeholder="Min">
+            <span>to</span>
+            <input type="number" id="heatmapLevelMax" min="0" max="99" placeholder="Max">
+            <button type="button" class="ghost-button heatmap-level-reset" id="heatmapLevelResetButton">All</button>
+          </div>
+        </label>
+        <label class="field">
+          <span>Find location or SKU</span>
+          <input type="search" id="heatmapSearchInput" placeholder="WF441002 or SKU">
+        </label>
+        <label class="toggle-pill">
+          <input type="checkbox" id="heatmapPickedOnly">
+          <span>Only picked locations</span>
+        </label>
+        <label class="toggle-pill">
+          <input type="checkbox" id="heatmapOccupiedOnly">
+          <span>Only occupied locations</span>
+        </label>
+        <button type="button" class="ghost-button" id="heatmapResetCameraButton">Reset camera</button>
+        <button type="button" id="heatmapReloadButton">Reload</button>
+      </div>
+    </section>
 
-  <section class="heatmap-layout" id="heatmapLayout">
-    <section class="panel-card heatmap-scene-card">
+    <section class="heatmap-layout-grid">
+      <section class="panel-card heatmap-scene-card">
       <div class="panel-head">
         <div>
           <p class="eyebrow">3D Scene</p>
@@ -164,9 +165,9 @@
           </div>
         </div>
       </div>
-    </section>
+      </section>
 
-    <aside class="panel-card heatmap-sidebar">
+      <aside class="panel-card heatmap-sidebar">
       <div class="panel-head">
         <div>
           <p class="eyebrow">Selection</p>
@@ -205,7 +206,8 @@
       <div id="heatmapHotAisles" class="heatmap-hot-aisles">
         <p class="admin-loading">Loading...</p>
       </div>
-    </aside>
+      </aside>
+    </section>
   </section>
 </main>
 

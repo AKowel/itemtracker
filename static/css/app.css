@@ -1475,6 +1475,11 @@ body.lightbox-open {
   overflow: hidden;
 }
 
+.heatmap-fullscreen-shell {
+  display: grid;
+  gap: 18px;
+}
+
 .heatmap-toolbar {
   display: flex;
   flex-wrap: wrap;
@@ -1522,7 +1527,7 @@ body.lightbox-open {
   white-space: nowrap;
 }
 
-.heatmap-layout {
+.heatmap-layout-grid {
   display: grid;
   grid-template-columns: minmax(0, 1.8fr) minmax(320px, 0.9fr);
   gap: 18px;
@@ -1686,6 +1691,10 @@ body.lightbox-open {
 .heatmap-sidebar {
   display: grid;
   gap: 16px;
+  background:
+    radial-gradient(circle at top right, rgba(146, 190, 255, 0.14), transparent 42%),
+    linear-gradient(180deg, rgba(255,255,255,0.96), rgba(236, 244, 252, 0.92));
+  border-color: color-mix(in srgb, var(--line) 68%, white);
 }
 
 .heatmap-stats-grid {
@@ -1694,13 +1703,24 @@ body.lightbox-open {
   gap: 12px;
 }
 
+.heatmap-stats-grid .metric-card:first-child {
+  background: linear-gradient(180deg, rgba(230, 245, 255, 0.96), rgba(245, 250, 255, 0.96));
+  border-color: rgba(99, 171, 224, 0.24);
+}
+
+.heatmap-stats-grid .metric-card:last-child {
+  background: linear-gradient(180deg, rgba(255, 243, 219, 0.96), rgba(255, 249, 240, 0.96));
+  border-color: rgba(214, 163, 71, 0.26);
+}
+
 .heatmap-snapshot-info {
   display: grid;
   gap: 6px;
   padding: 16px 18px;
   border-radius: 20px;
-  border: 1px solid color-mix(in srgb, var(--line) 74%, white);
-  background: color-mix(in srgb, var(--surface-alt) 72%, white);
+  border: 1px solid rgba(101, 136, 194, 0.24);
+  background: linear-gradient(180deg, rgba(236, 243, 255, 0.98), rgba(225, 235, 248, 0.96));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72);
 }
 
 .heatmap-snapshot-info strong {
@@ -1717,8 +1737,9 @@ body.lightbox-open {
   gap: 14px;
   padding: 18px;
   border-radius: 22px;
-  border: 1px solid color-mix(in srgb, var(--line) 78%, white);
-  background: linear-gradient(180deg, var(--surface-alt), var(--surface));
+  border: 1px solid rgba(122, 152, 205, 0.22);
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(241, 247, 255, 0.96));
+  box-shadow: 0 12px 28px rgba(21, 34, 56, 0.08);
 }
 
 .heatmap-detail-card__empty,
@@ -1749,8 +1770,8 @@ body.lightbox-open {
   gap: 4px;
   padding: 12px;
   border-radius: 16px;
-  background: color-mix(in srgb, var(--surface-alt) 68%, white);
-  border: 1px solid color-mix(in srgb, var(--line) 72%, white);
+  background: linear-gradient(180deg, rgba(246, 249, 255, 0.96), rgba(233, 240, 249, 0.94));
+  border: 1px solid rgba(129, 158, 206, 0.18);
 }
 
 .heatmap-detail-grid span {
@@ -1800,8 +1821,8 @@ body.lightbox-open {
   gap: 4px;
   padding: 14px 16px;
   border-radius: 18px;
-  border: 1px solid color-mix(in srgb, var(--line) 74%, white);
-  background: color-mix(in srgb, var(--surface-alt) 70%, white);
+  border: 1px solid rgba(170, 139, 84, 0.18);
+  background: linear-gradient(180deg, rgba(255, 245, 227, 0.98), rgba(241, 246, 255, 0.95));
 }
 
 .heatmap-hot-aisle strong {
@@ -1812,54 +1833,149 @@ body.lightbox-open {
   color: var(--text-1);
 }
 
-.heatmap-layout:fullscreen {
+.heatmap-fullscreen-shell:fullscreen {
   width: 100vw;
   height: 100vh;
   padding: 16px;
   box-sizing: border-box;
-  grid-template-columns: minmax(0, 1fr) minmax(320px, 380px);
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 16px;
   align-items: stretch;
+  overflow: hidden;
   background:
     radial-gradient(circle at top, rgba(67, 108, 181, 0.2), transparent 35%),
     linear-gradient(180deg, #08111c 0%, #0c1728 100%);
 }
 
-.heatmap-layout:fullscreen .heatmap-scene-card,
-.heatmap-layout:fullscreen .heatmap-sidebar {
-  height: calc(100vh - 32px);
-}
-
-.heatmap-layout:fullscreen .heatmap-scene-card {
+.heatmap-fullscreen-shell:fullscreen .heatmap-toolbar-card {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-}
-
-.heatmap-layout:fullscreen .heatmap-scene-wrap {
-  min-height: 0;
-  height: 100%;
-}
-
-.heatmap-layout:fullscreen #heatmapCanvas {
-  height: 100%;
-}
-
-.heatmap-layout:fullscreen .heatmap-sidebar {
-  display: grid;
-  gap: 14px;
+  gap: 12px;
   align-content: start;
-  overflow: auto;
-  background: rgba(9, 16, 28, 0.92);
+  padding: 16px 18px;
+  background: linear-gradient(180deg, rgba(10, 18, 31, 0.96), rgba(12, 26, 42, 0.94));
   border-color: rgba(145, 181, 255, 0.18);
   backdrop-filter: blur(14px);
 }
 
-.heatmap-layout:fullscreen .heatmap-scene-hint {
+.heatmap-fullscreen-shell:fullscreen .heatmap-toolbar-card .panel-head {
+  align-items: start;
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-toolbar-card .panel-head h2,
+.heatmap-fullscreen-shell:fullscreen .heatmap-toolbar-card .panel-head p:not(.eyebrow),
+.heatmap-fullscreen-shell:fullscreen .heatmap-toolbar-card .field span,
+.heatmap-fullscreen-shell:fullscreen .heatmap-level-filter span,
+.heatmap-fullscreen-shell:fullscreen .heatmap-toolbar-card .toggle-pill span {
+  color: rgba(229, 239, 255, 0.82);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-toolbar-card .eyebrow {
+  color: rgba(161, 194, 255, 0.78);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-layout-grid {
+  min-height: 0;
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
+  gap: 16px;
+  align-items: stretch;
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-scene-card,
+.heatmap-fullscreen-shell:fullscreen .heatmap-sidebar {
+  height: 100%;
+  min-height: 0;
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-scene-card {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-scene-wrap {
+  min-height: 0;
+  height: 100%;
+}
+
+.heatmap-fullscreen-shell:fullscreen #heatmapCanvas {
+  height: 100%;
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-sidebar {
+  display: grid;
+  gap: 14px;
+  align-content: start;
+  overflow: auto;
+  background: linear-gradient(180deg, rgba(8, 16, 28, 0.98), rgba(12, 26, 42, 0.95));
+  border-color: rgba(145, 181, 255, 0.18);
+  backdrop-filter: blur(14px);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-sidebar .panel-head h2,
+.heatmap-fullscreen-shell:fullscreen .heatmap-sidebar .panel-head p:not(.eyebrow),
+.heatmap-fullscreen-shell:fullscreen #heatmapDetailHint {
+  color: rgba(230, 239, 255, 0.84);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-sidebar .eyebrow {
+  color: rgba(167, 197, 250, 0.74);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-stats-grid .metric-card:first-child {
+  background: linear-gradient(180deg, rgba(18, 52, 86, 0.98), rgba(12, 33, 55, 0.96));
+  border-color: rgba(104, 185, 255, 0.24);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-stats-grid .metric-card:last-child {
+  background: linear-gradient(180deg, rgba(87, 59, 20, 0.98), rgba(56, 38, 16, 0.96));
+  border-color: rgba(255, 197, 101, 0.22);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-stats-grid .metric-card strong,
+.heatmap-fullscreen-shell:fullscreen .heatmap-stats-grid .metric-card span,
+.heatmap-fullscreen-shell:fullscreen .heatmap-stats-grid .metric-card .eyebrow {
+  color: rgba(243, 247, 255, 0.94);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-snapshot-info {
+  background: linear-gradient(180deg, rgba(18, 33, 54, 0.96), rgba(10, 21, 36, 0.94));
+  border-color: rgba(128, 170, 236, 0.26);
+  box-shadow: none;
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-snapshot-info strong {
+  color: #f4f7ff;
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-snapshot-info span {
+  color: rgba(225, 236, 255, 0.78);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-detail-card {
+  background: linear-gradient(180deg, rgba(248, 250, 255, 0.98), rgba(230, 237, 247, 0.96));
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 18px 32px rgba(0, 0, 0, 0.18);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-hot-aisle {
+  background: linear-gradient(180deg, rgba(40, 57, 79, 0.95), rgba(19, 32, 49, 0.94));
+  border-color: rgba(126, 169, 238, 0.18);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-hot-aisle strong {
+  color: #ffe6a6;
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-hot-aisle span {
+  color: rgba(231, 240, 255, 0.78);
+}
+
+.heatmap-fullscreen-shell:fullscreen .heatmap-scene-hint {
   display: grid;
 }
 
 @media (max-width: 1100px) {
-  .heatmap-layout {
+  .heatmap-layout-grid {
     grid-template-columns: 1fr;
   }
 }
