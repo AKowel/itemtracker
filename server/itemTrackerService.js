@@ -2396,7 +2396,11 @@ class ItemTrackerService {
       }))
       .sort((a, b) => String(b.date).localeCompare(String(a.date)));
 
-    const topSkus = Array.from(skuMap.values()).map((entry) => ({
+    const skuMapValues = Array.from(skuMap.values());
+    const totalSkuPickCount = skuMapValues.reduce((sum, e) => sum + Number(e.pick_count || 0), 0) || 1;
+    const totalSkuPickQty = skuMapValues.reduce((sum, e) => sum + safeNumber(e.pick_qty || 0), 0) || 1;
+
+    const topSkus = skuMapValues.map((entry) => ({
       sku: entry.sku,
       label: entry.label,
       description: entry.description,
@@ -2406,7 +2410,9 @@ class ItemTrackerService {
       location_count: entry._locationSet.size,
       aisle_count: entry._aisleSet.size,
       avg_qty_per_pick: entry.pick_count ? entry.pick_qty / entry.pick_count : 0,
-      share_of_picks: totalPickCount ? (entry.pick_count / totalPickCount) * 100 : 0
+      share_of_picks: rankBy === "pick_qty"
+        ? (safeNumber(entry.pick_qty || 0) / totalSkuPickQty) * 100
+        : (Number(entry.pick_count || 0) / totalSkuPickCount) * 100
     }));
 
     const topLocations = Array.from(locationMap.values()).map((entry) => ({

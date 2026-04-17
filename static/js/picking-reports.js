@@ -471,7 +471,7 @@ function renderLevelCompliance(reports) {
       <article class="reports-summary-card__item">
         <span class="eyebrow">Compliant picks</span>
         <strong>${formatInteger(summary.compliant_pick_count || 0)}</strong>
-        <p>${formatPercent(summary.compliant_share_of_picks || 0, 1)} of picks are currently below level ${formatInteger((summary.threshold || 10) - 1)}.</p>
+        <p>${formatPercent(summary.compliant_share_of_picks || 0, 1)} of picks are currently below level ${formatInteger(summary.threshold || 10)} (compliant).</p>
       </article>
       <article class="reports-summary-card__item">
         <span class="eyebrow">High-level picks</span>
@@ -645,7 +645,7 @@ function renderTopSkus(reports) {
       { label: "Days", render: (row) => formatInteger(row.day_count || 0) },
       { label: "Locations", render: (row) => formatInteger(row.location_count || 0) },
       { label: "Avg qty / pick", render: (row) => formatDecimal(row.avg_qty_per_pick || 0, 2) },
-      { label: "Share", render: (row) => formatPercent(row.share_of_picks || 0, 1) }
+      { label: "Share of SKU data", render: (row) => formatPercent(row.share_of_picks || 0, 1) }
     ],
     "No SKU activity matches the selected range."
   );
@@ -782,8 +782,8 @@ function renderHighLevelSkus(reports) {
       { label: `Level ${threshold}+ qty`, render: (row) => formatInteger(row.high_level_pick_qty || 0) },
       { label: "All picks", render: (row) => formatInteger(row.pick_count || 0) },
       { label: "High-level share", render: (row) => formatPercent(row.high_level_share_of_sku_picks || 0, 1) },
-      { label: "Lowest", render: (row) => formatInteger(row.lowest_level || 0) },
-      { label: "Highest", render: (row) => formatInteger(row.highest_level || 0) }
+      { label: "Min level seen", render: (row) => formatInteger(row.lowest_level || 0) },
+      { label: "Max level seen", render: (row) => formatInteger(row.highest_level || 0) }
     ],
     `No SKU activity was found on level ${threshold}+ for the selected range.`
   );
