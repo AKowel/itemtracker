@@ -316,6 +316,16 @@ function arrayText(values = []) {
   return Array.from(new Set((values || []).filter(Boolean))).join(", ");
 }
 
+function splitListText(value = "") {
+  return Array.from(new Set(
+    String(value || "")
+      .split(",")
+      .map((item) => item.trim().toUpperCase())
+      .filter(Boolean)
+      .filter((item) => item !== "UNKNOWN")
+  ));
+}
+
 function recordFileName(record, fieldName) {
   const value = record?.[fieldName];
   if (Array.isArray(value)) {
@@ -1376,7 +1386,6 @@ class ItemTrackerService {
     let pickState = { snapshot: null, meta: pickActivitySnapshotMeta(null, "none") };
     let pickRows = [];
     let pickLoadedDates = [];
-    let timeline = [];
     if (range.matchedDates.length) {
       const snapshots = await Promise.all(
         range.matchedDates.map((date) => this.loadPickActivitySnapshot(date, targetClient))
@@ -1438,20 +1447,10 @@ class ItemTrackerService {
           continue;
         }
         const frameDate = String(snapshot.snapshot_date || snapshotState?.meta?.snapshot_date || "").trim();
-        const frameMap = new Map();
         pickLoadedDates.push(frameDate);
         for (const row of snapshot.rows || []) {
           mergePickRow(byLocation, row);
-          mergePickRow(frameMap, row);
         }
-        const frameRows = finalizePickRows(frameMap);
-        timeline.push({
-          snapshot_date: frameDate,
-          total_pick_count: frameRows.reduce((sum, row) => sum + Number(row.pick_count || 0), 0),
-          total_pick_qty: frameRows.reduce((sum, row) => sum + safeNumber(row.pick_qty || 0), 0),
-          row_count: frameRows.length,
-          rows: frameRows
-        });
       }
       pickRows = finalizePickRows(byLocation);
       const totalPickCount = pickRows.reduce((sum, row) => sum + Number(row.pick_count || 0), 0);
@@ -1813,10 +1812,6 @@ class ItemTrackerService {
     });
 
     const rows = annotateRows(buildMergedRows(pickRows));
-    timeline = timeline.map((frame) => ({
-      ...frame,
-      rows: annotateRows(buildMergedRows(frame.rows || []))
-    }));
 
     // Collect all known bin size codes from data
     const knownBinSizes = new Set();
@@ -1915,7 +1910,6 @@ class ItemTrackerService {
         picked_location_count: pickedCount,
         total_pick_count: totalPickCount,
         total_pick_qty: totalPickQty,
-        playback_frame_count: timeline.length,
         recommendation_summary: recommendationSummary,
         prime_space_summary: primeSpaceSummary,
         hottest_aisles: Array.from(hottestByAisle.values())
@@ -1925,8 +1919,7 @@ class ItemTrackerService {
             (b.pick_qty - a.pick_qty)
           ))
           .slice(0, 8)
-      },
-      timeline
+      }
     };
   }
 
@@ -2925,6 +2918,201 @@ class ItemTrackerService {
       easy_wins: levelComplianceEasyWins
     };
 
+    const primeSpaceSupplyPool = Array.from(warehouseLocationMap.values())
+      .filter((entry) => Number(entry.level_number || 0) > 0 && Number(entry.level_number || 0) <= PRIME_SPACE_LEVEL_THRESHOLD)
+      .map((entry) => {
+        const activity = locationMap.get(entry.location) || null;
+        const abcEntry = abcVelocityMap.get(entry.sku) || null;
+        const currentPickCount = Number(activity?.pick_count || 0);
+        const currentPickQty = safeNumber(activity?.pick_qty || 0);
+        const isEmpty = !entry.sku;
+        const isBulk = entry.bin_type === "Bulk";
+        const isUnderused = (abcEntry?.abc_class === "C") || (!abcEntry && currentPickCount <= 0 && currentPickQty <= 0);
+
+        let candidateType = "Stable prime slot";
+        let candidatePriority = 0;
+        let candidateReason = "Current occupant already looks like a reasonable low-level fit.";
+
+        if (isEmpty) {
+          candidateType = "Open prime slot";
+          candidatePriority = 100;
+          candidateReason = "Low-level prime space is currently empty and ready for a faster mover.";
+        } else if (isBulk) {
+          candidateType = "Bulk in prime space";
+          candidatePriority = 92;
+          candidateReason = "Low-level prime space is currently tied up by bulk storage instead of a pick-face slot.";
+        } else if (isUnderused) {
+          candidateType = "Underused prime slot";
+          candidatePriority = abcEntry?.abc_class === "C" ? 84 : 76;
+          candidateReason = abcEntry?.abc_class === "C"
+            ? "A slow-moving C-class SKU is occupying low-level prime space."
+            : "This low-level location has little or no recorded pick demand in the selected range.";
+        }
+
+        return {
+          location: entry.location,
+          aisle_prefix: entry.aisle_prefix,
+          bay: entry.bay,
+          level: entry.level,
+          slot: entry.slot,
+          level_number: entry.level_number,
+          bin_size: entry.bin_size || "Unknown",
+          bin_type: entry.bin_type || "Unknown",
+          current_sku: entry.sku,
+          current_abc_class: abcEntry?.abc_class || "",
+          current_pick_count: currentPickCount,
+          current_pick_qty: currentPickQty,
+          candidate_type: candidateType,
+          candidate_priority: candidatePriority,
+          candidate_reason: candidateReason
+        };
+      })
+      .filter((entry) => entry.candidate_type !== "Stable prime slot")
+      .sort((a, b) => (
+        Number(b.candidate_priority || 0) - Number(a.candidate_priority || 0) ||
+        Number(a.level_number || 0) - Number(b.level_number || 0) ||
+        String(a.location || "").localeCompare(String(b.location || ""))
+      ));
+
+    const primeSpaceDemandSkus = moveLowerRecommendations
+      .map((entry) => {
+        const abcEntry = abcVelocityMap.get(entry.sku) || null;
+        const preferredBinSizes = splitListText(abcEntry?.bin_sizes_seen || "");
+        const preferredBinTypes = splitListText(abcEntry?.bin_types_seen || "");
+        return {
+          sku: entry.sku,
+          description: entry.description,
+          abc_class: entry.abc_class,
+          move_lower_score: entry.move_lower_score,
+          high_level_share: entry.high_level_share,
+          high_level_pick_count: entry.high_level_pick_count,
+          low_level_pick_count: entry.low_level_pick_count,
+          lowest_level: entry.lowest_level,
+          highest_level: entry.highest_level,
+          preferred_bin_sizes: preferredBinSizes,
+          preferred_bin_sizes_text: preferredBinSizes.join(", ") || "Any",
+          preferred_bin_types: preferredBinTypes,
+          preferred_bin_types_text: preferredBinTypes.join(", ") || "Any",
+          demand_reason: entry.recommendation_reason || entry.suggested_action || `Deserves coverage below level ${HIGH_LEVEL_THRESHOLD}.`
+        };
+      })
+      .filter((entry) => (
+        entry.abc_class === "A" ||
+        entry.abc_class === "B" ||
+        safeNumber(entry.high_level_share || 0) >= 60 ||
+        Number(entry.low_level_pick_count || 0) <= 0
+      ))
+      .slice(0, Math.max(limit, 25));
+
+    const usedPrimeLocations = new Set();
+    const primeSpaceMatches = [];
+    for (const demandEntry of primeSpaceDemandSkus) {
+      const demandBinSizes = Array.isArray(demandEntry.preferred_bin_sizes) ? demandEntry.preferred_bin_sizes : [];
+      const bestSupply = primeSpaceSupplyPool
+        .filter((supplyEntry) => !usedPrimeLocations.has(supplyEntry.location))
+        .map((supplyEntry) => {
+          const noSizePreference = !demandBinSizes.length;
+          const sizeMatch = !demandBinSizes.length || !supplyEntry.bin_size || supplyEntry.bin_size === "Unknown"
+            ? false
+            : demandBinSizes.includes(String(supplyEntry.bin_size || "").trim().toUpperCase());
+          const supplySizeUnknown = !supplyEntry.bin_size || supplyEntry.bin_size === "Unknown";
+          const typeScore = supplyEntry.candidate_type === "Open prime slot"
+            ? 24
+            : supplyEntry.candidate_type === "Bulk in prime space"
+              ? 18
+              : 14;
+          const sizeScore = sizeMatch ? 18 : noSizePreference ? 6 : supplySizeUnknown ? 8 : -4;
+          const binTypeScore = supplyEntry.bin_type === "Pick"
+            ? 10
+            : supplyEntry.bin_type === "Unknown"
+              ? 6
+              : -3;
+          const abcScore = demandEntry.abc_class === "A" ? 12 : demandEntry.abc_class === "B" ? 6 : 0;
+          const noLowLevelScore = Number(demandEntry.low_level_pick_count || 0) <= 0 ? 6 : 0;
+          const matchScore = roundMetric(
+            safeNumber(demandEntry.move_lower_score || 0) +
+            typeScore +
+            sizeScore +
+            binTypeScore +
+            abcScore +
+            noLowLevelScore,
+            1
+          );
+          const matchReasonBits = [];
+          if (sizeMatch) {
+            matchReasonBits.push("Bin size looks compatible");
+          } else if (noSizePreference) {
+            matchReasonBits.push("No strong bin-size preference recorded");
+          } else if (supplySizeUnknown) {
+            matchReasonBits.push("Supply slot bin size is unknown");
+          }
+          if (supplyEntry.candidate_type === "Open prime slot") {
+            matchReasonBits.push("Location is already open");
+          } else if (supplyEntry.candidate_type === "Bulk in prime space") {
+            matchReasonBits.push("Location is currently bulk in prime space");
+          } else {
+            matchReasonBits.push("Location looks underused");
+          }
+          if (demandEntry.abc_class === "A") {
+            matchReasonBits.push("A-class demand");
+          } else if (demandEntry.abc_class === "B") {
+            matchReasonBits.push("B-class demand");
+          }
+          return {
+            supplyEntry,
+            matchScore,
+            sizeMatch,
+            matchReason: arrayText(matchReasonBits)
+          };
+        })
+        .sort((a, b) => (
+          safeNumber(b.matchScore || 0) - safeNumber(a.matchScore || 0) ||
+          Number(b.supplyEntry.candidate_priority || 0) - Number(a.supplyEntry.candidate_priority || 0) ||
+          String(a.supplyEntry.location || "").localeCompare(String(b.supplyEntry.location || ""))
+        ))[0];
+
+      if (!bestSupply || safeNumber(bestSupply.matchScore || 0) < 40) {
+        continue;
+      }
+
+      usedPrimeLocations.add(bestSupply.supplyEntry.location);
+      primeSpaceMatches.push({
+        sku: demandEntry.sku,
+        description: demandEntry.description,
+        abc_class: demandEntry.abc_class,
+        move_lower_score: demandEntry.move_lower_score,
+        current_levels: `${demandEntry.lowest_level || 0}-${demandEntry.highest_level || 0}`,
+        high_level_share: demandEntry.high_level_share,
+        preferred_bin_sizes: demandEntry.preferred_bin_sizes_text,
+        candidate_location: bestSupply.supplyEntry.location,
+        candidate_level: bestSupply.supplyEntry.level,
+        candidate_bin_size: bestSupply.supplyEntry.bin_size,
+        candidate_bin_type: bestSupply.supplyEntry.bin_type,
+        candidate_type: bestSupply.supplyEntry.candidate_type,
+        current_occupant_sku: bestSupply.supplyEntry.current_sku || "",
+        current_occupant_abc_class: bestSupply.supplyEntry.current_abc_class || "",
+        current_occupant_pick_count: bestSupply.supplyEntry.current_pick_count,
+        current_occupant_pick_qty: bestSupply.supplyEntry.current_pick_qty,
+        match_score: bestSupply.matchScore,
+        match_reason: arrayText([bestSupply.matchReason, demandEntry.demand_reason])
+      });
+    }
+
+    const primeSpace = {
+      summary: {
+        threshold: PRIME_SPACE_LEVEL_THRESHOLD,
+        supply_candidate_count: primeSpaceSupplyPool.length,
+        demand_candidate_count: primeSpaceDemandSkus.length,
+        matched_candidate_count: primeSpaceMatches.length,
+        open_slot_count: primeSpaceSupplyPool.filter((entry) => entry.candidate_type === "Open prime slot").length,
+        underused_slot_count: primeSpaceSupplyPool.filter((entry) => entry.candidate_type === "Underused prime slot").length,
+        bulk_slot_count: primeSpaceSupplyPool.filter((entry) => entry.candidate_type === "Bulk in prime space").length
+      },
+      supply: primeSpaceSupplyPool.slice(0, 60),
+      demand: primeSpaceDemandSkus.slice(0, 60),
+      matches: primeSpaceMatches.slice(0, 40)
+    };
+
     const recommendations = {
       summary: {
         recommendation_note: "Scores are weighted from pick activity, level position, replenishment burden, bulk-vs-pick behaviour, and ABC velocity so the highest rows should be the most actionable first.",
@@ -2934,7 +3122,10 @@ class ItemTrackerService {
         abc_a_sku_count: Number(abcVelocitySummary.find((entry) => entry.abc_class === "A")?.sku_count || 0),
         abc_b_sku_count: Number(abcVelocitySummary.find((entry) => entry.abc_class === "B")?.sku_count || 0),
         abc_c_sku_count: Number(abcVelocitySummary.find((entry) => entry.abc_class === "C")?.sku_count || 0),
-        level_compliance_easy_win_count: levelComplianceEasyWins.length
+        level_compliance_easy_win_count: levelComplianceEasyWins.length,
+        prime_space_supply_count: primeSpace.summary.supply_candidate_count,
+        prime_space_match_count: primeSpace.summary.matched_candidate_count,
+        prime_space_open_slot_count: primeSpace.summary.open_slot_count
       },
       abc_velocity: {
         metric: abcMetricKey,
@@ -2947,7 +3138,8 @@ class ItemTrackerService {
         move_to_pick_bin: moveToPickBinRecommendations
       },
       level_compliance: levelCompliance,
-      pick_face_suitability: pickFaceSuitability
+      pick_face_suitability: pickFaceSuitability,
+      prime_space: primeSpace
     };
 
     return {
@@ -2971,6 +3163,7 @@ class ItemTrackerService {
         warehouse_supports_max_bin_qty: warehouseSupportsMaxBinQty,
         item_catalog_meta: catalogState?.meta || this.snapshotMeta(null, "none"),
         high_level_threshold: HIGH_LEVEL_THRESHOLD,
+        prime_space_level_threshold: PRIME_SPACE_LEVEL_THRESHOLD,
         sku_detail_source: "Published snapshot SKU detail",
         sku_detail_note: "SKU rankings are aggregated from the SKU detail stored inside each published pick snapshot.",
         structure_note: "Pick/bulk uses BLBKPK (B/P), bin size uses BLSCOD, and replenishment estimates use BLMAXQ when that field exists in the warehouse snapshot.",
@@ -3010,7 +3203,10 @@ class ItemTrackerService {
         replenishment_locations_missing_max: replenishmentMissingMax.length,
         move_lower_candidate_count: recommendations.summary.move_lower_candidate_count,
         move_to_pick_bin_candidate_count: recommendations.summary.move_to_pick_bin_candidate_count,
-        pick_face_issue_count: recommendations.summary.pick_face_issue_count
+        pick_face_issue_count: recommendations.summary.pick_face_issue_count,
+        prime_space_supply_count: recommendations.summary.prime_space_supply_count,
+        prime_space_match_count: recommendations.summary.prime_space_match_count,
+        prime_space_open_slot_count: recommendations.summary.prime_space_open_slot_count
       },
       top_skus: sortedTopSkus.slice(0, limit),
       top_locations: sortedTopLocations.slice(0, 25),
@@ -3087,7 +3283,10 @@ class ItemTrackerService {
         { metric: "Replenishment locations", value: Number(summary.replenishment_location_count || 0) },
         { metric: "Move-lower candidates", value: Number(summary.move_lower_candidate_count || 0) },
         { metric: "Bulk-to-pick candidates", value: Number(summary.move_to_pick_bin_candidate_count || 0) },
-        { metric: "Pick-face issues", value: Number(summary.pick_face_issue_count || 0) }
+        { metric: "Pick-face issues", value: Number(summary.pick_face_issue_count || 0) },
+        { metric: "Prime-space supply", value: Number(summary.prime_space_supply_count || 0) },
+        { metric: "Prime-space matches", value: Number(summary.prime_space_match_count || 0) },
+        { metric: "Open prime slots", value: Number(summary.prime_space_open_slot_count || 0) }
       ]
     );
 
@@ -3114,6 +3313,7 @@ class ItemTrackerService {
         { metric: "Loaded dates", value: loadedDates.join(", ") || "None" },
         { metric: "Available dates", value: availableDates.join(", ") || "None" },
         { metric: "High-level threshold", value: Number(meta.high_level_threshold || HIGH_LEVEL_THRESHOLD) },
+        { metric: "Prime-space threshold", value: Number(meta.prime_space_level_threshold || PRIME_SPACE_LEVEL_THRESHOLD) },
         { metric: "SKU detail source", value: meta.sku_detail_source || "" },
         { metric: "SKU detail note", value: meta.sku_detail_note || "" },
         { metric: "Structure note", value: meta.structure_note || "" },
@@ -3241,6 +3441,68 @@ class ItemTrackerService {
       ],
       reports?.recommendations?.pick_face_suitability || [],
       "No pick-face suitability rows are available for the selected range."
+    );
+
+    addWorksheetTable(
+      workbook,
+      "Prime Space List",
+      [
+        { header: "Rank", key: "rank", width: 10, value: (_row, index) => index + 1, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "SKU", key: "sku", width: 18 },
+        { header: "Description", key: "description", width: 36, maxWidth: 60 },
+        { header: "ABC class", key: "abc_class", width: 10 },
+        { header: "Move-lower score", key: "move_lower_score", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.0" },
+        { header: "Current levels", key: "current_levels", width: 14 },
+        { header: "Candidate location", key: "candidate_location", width: 18 },
+        { header: "Candidate type", key: "candidate_type", width: 20, maxWidth: 32 },
+        { header: "Candidate level", key: "candidate_level", width: 12 },
+        { header: "Bin size", key: "candidate_bin_size", width: 12 },
+        { header: "Current occupant", key: "current_occupant_sku", width: 18 },
+        { header: "Match score", key: "match_score", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.0" },
+        { header: "Reason", key: "match_reason", width: 38, maxWidth: 70 }
+      ],
+      reports?.recommendations?.prime_space?.matches || [],
+      "No prime-space candidate matches are available for the selected range."
+    );
+
+    addWorksheetTable(
+      workbook,
+      "Prime Space Supply",
+      [
+        { header: "Location", key: "location", width: 18 },
+        { header: "Aisle", key: "aisle_prefix", width: 12 },
+        { header: "Level", key: "level", width: 10 },
+        { header: "Slot", key: "slot", width: 10 },
+        { header: "Candidate type", key: "candidate_type", width: 20, maxWidth: 32 },
+        { header: "Priority", key: "candidate_priority", width: 12, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Bin size", key: "bin_size", width: 12 },
+        { header: "Bin type", key: "bin_type", width: 12 },
+        { header: "Current SKU", key: "current_sku", width: 18 },
+        { header: "Current ABC", key: "current_abc_class", width: 12 },
+        { header: "Pick count", key: "current_pick_count", width: 14, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Pick qty", key: "current_pick_qty", width: 14, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.00" },
+        { header: "Reason", key: "candidate_reason", width: 38, maxWidth: 70 }
+      ],
+      reports?.recommendations?.prime_space?.supply || [],
+      "No prime-space supply candidates are available for the selected range."
+    );
+
+    addWorksheetTable(
+      workbook,
+      "Prime Space Demand",
+      [
+        { header: "SKU", key: "sku", width: 18 },
+        { header: "Description", key: "description", width: 36, maxWidth: 60 },
+        { header: "ABC class", key: "abc_class", width: 10 },
+        { header: "Move-lower score", key: "move_lower_score", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.0" },
+        { header: "High-level share (%)", key: "high_level_share", width: 16, alignment: { horizontal: "right", vertical: "top" }, numFmt: "0.0" },
+        { header: "High-level picks", key: "high_level_pick_count", width: 16, alignment: { horizontal: "right", vertical: "top" } },
+        { header: "Current levels", key: "levels", width: 14, value: (row) => `${row.lowest_level || 0}-${row.highest_level || 0}` },
+        { header: "Preferred bin sizes", key: "preferred_bin_sizes_text", width: 20, maxWidth: 36 },
+        { header: "Reason", key: "demand_reason", width: 38, maxWidth: 70 }
+      ],
+      reports?.recommendations?.prime_space?.demand || [],
+      "No prime-space demand candidates are available for the selected range."
     );
 
     addWorksheetTable(

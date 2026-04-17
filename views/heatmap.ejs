@@ -115,47 +115,6 @@
         <button type="button" class="ghost-button" id="heatmapResetCameraButton">Reset camera</button>
         <button type="button" id="heatmapReloadButton">Reload</button>
       </div>
-      <div class="heatmap-playback-controls">
-        <span class="eyebrow">Playback</span>
-        <button type="button" class="ghost-button" id="heatmapPlaybackPrevButton">Prev</button>
-        <button type="button" class="ghost-button" id="heatmapPlaybackToggleButton">Play</button>
-        <button type="button" class="ghost-button" id="heatmapPlaybackNextButton">Next</button>
-        <button type="button" class="ghost-button" id="heatmapPlaybackResetButton">Aggregate</button>
-        <label class="field heatmap-playback-speed-field">
-          <span>Speed</span>
-          <select id="heatmapPlaybackSpeedSelect">
-            <option value="750">0.75s</option>
-            <option value="1000" selected>1.0s</option>
-            <option value="1500">1.5s</option>
-            <option value="2000">2.0s</option>
-          </select>
-        </label>
-        <span class="chip chip--inactive" id="heatmapPlaybackStatusChip">Aggregate view</span>
-      </div>
-      <div class="heatmap-timeline-shell">
-        <div class="heatmap-timeline-head">
-          <div>
-            <p class="eyebrow">Timeline Scrubber</p>
-            <strong id="heatmapTimelineLabel">Aggregate range</strong>
-          </div>
-          <span id="heatmapTimelineMeta">No loaded playback frames yet</span>
-        </div>
-        <input
-          type="range"
-          id="heatmapTimelineRange"
-          class="heatmap-timeline-range"
-          min="0"
-          max="0"
-          step="1"
-          value="0"
-          disabled
-        >
-        <div class="heatmap-timeline-foot">
-          <span id="heatmapTimelineStartLabel">Start</span>
-          <span id="heatmapTimelineCurrentLabel">Aggregate view</span>
-          <span id="heatmapTimelineEndLabel">End</span>
-        </div>
-      </div>
     </section>
 
     <section class="heatmap-layout-grid">

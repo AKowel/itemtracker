@@ -39,6 +39,7 @@ const bulkToPickWrap = doc?.getElementById("reportsBulkToPickWrap") || null;
 const abcVelocityWrap = doc?.getElementById("reportsAbcVelocityWrap") || null;
 const levelComplianceWrap = doc?.getElementById("reportsLevelComplianceWrap") || null;
 const pickFaceSuitabilityWrap = doc?.getElementById("reportsPickFaceSuitabilityWrap") || null;
+const primeSpaceWrap = doc?.getElementById("reportsPrimeSpaceWrap") || null;
 const topSkusWrap = doc?.getElementById("reportsTopSkusWrap") || null;
 const skuOutliersWrap = doc?.getElementById("reportsSkuOutliersWrap") || null;
 const locationOutliersWrap = doc?.getElementById("reportsLocationOutliersWrap") || null;
@@ -392,6 +393,16 @@ function renderRecommendationsSummary(reports) {
       <p>High-level picking opportunities that look easiest to attack first.</p>
     </article>
     <article class="reports-summary-card__item">
+      <span class="eyebrow">Prime matches</span>
+      <strong>${formatInteger(summary.prime_space_match_count || 0)}</strong>
+      <p>Suggested pairings between strong move-lower SKUs and current low-level prime slots.</p>
+    </article>
+    <article class="reports-summary-card__item">
+      <span class="eyebrow">Open prime slots</span>
+      <strong>${formatInteger(summary.prime_space_open_slot_count || 0)}</strong>
+      <p>Low-level slots already open and ready if we want to improve slotting quickly.</p>
+    </article>
+    <article class="reports-summary-card__item">
       <span class="eyebrow">Scoring note</span>
       <strong>Weighted recommendations</strong>
       <p>${escapeHtml(summary.recommendation_note || reports?.meta?.recommendation_note || "Scores combine activity, level position, replenishment burden, and ABC velocity.")}</p>
@@ -515,6 +526,68 @@ function renderPickFaceSuitability(reports) {
     ],
     "No pick-face suitability rows are available for the selected range."
   );
+}
+
+function renderPrimeSpaceCandidates(reports) {
+  if (!primeSpaceWrap) return;
+  const primeSpace = reports?.recommendations?.prime_space || {};
+  const summary = primeSpace.summary || {};
+  const rows = Array.isArray(primeSpace.matches) ? primeSpace.matches : [];
+  const summaryHtml = `
+    <div class="reports-summary-wrap" style="margin-bottom:1rem;">
+      <article class="reports-summary-card__item">
+        <span class="eyebrow">Open prime slots</span>
+        <strong>${formatInteger(summary.open_slot_count || 0)}</strong>
+        <p>Low-level locations that are already empty and could take a faster mover immediately.</p>
+      </article>
+      <article class="reports-summary-card__item">
+        <span class="eyebrow">Underused prime slots</span>
+        <strong>${formatInteger(summary.underused_slot_count || 0)}</strong>
+        <p>Prime locations currently occupied by slow or inactive demand that may be worth reclaiming.</p>
+      </article>
+      <article class="reports-summary-card__item">
+        <span class="eyebrow">Demand SKUs</span>
+        <strong>${formatInteger(summary.demand_candidate_count || 0)}</strong>
+        <p>SKUs whose high-level demand suggests they deserve low-level space first.</p>
+      </article>
+      <article class="reports-summary-card__item">
+        <span class="eyebrow">Matched moves</span>
+        <strong>${formatInteger(summary.matched_candidate_count || 0)}</strong>
+        <p>Suggested pairings between demand SKUs and current prime-space opportunities.</p>
+      </article>
+      <article class="reports-summary-card__item">
+        <span class="eyebrow">Prime threshold</span>
+        <strong>Levels 1-${formatInteger(summary.threshold || reports?.meta?.prime_space_level_threshold || 3)}</strong>
+        <p>Prime space is currently treated as the lowest levels, which is where the easiest walking and picking sits.</p>
+      </article>
+      <article class="reports-summary-card__item">
+        <span class="eyebrow">Bulk in prime</span>
+        <strong>${formatInteger(summary.bulk_slot_count || 0)}</strong>
+        <p>Low-level prime slots currently tied up by bulk storage instead of a stronger pick-face use.</p>
+      </article>
+    </div>
+  `;
+
+  const tableHost = document.createElement("div");
+  renderTable(
+    tableHost,
+    rows,
+    [
+      { label: "SKU", render: (row) => `<strong>${escapeHtml(row.sku || "-")}</strong>` },
+      { label: "ABC", render: (row) => escapeHtml(row.abc_class || "-") },
+      { label: "Move score", render: (row) => formatDecimal(row.move_lower_score || 0, 1) },
+      { label: "Current levels", render: (row) => escapeHtml(row.current_levels || "-") },
+      { label: "Suggested slot", render: (row) => `<strong>${escapeHtml(row.candidate_location || "-")}</strong>` },
+      { label: "Slot type", render: (row) => escapeHtml(row.candidate_type || "-") },
+      { label: "Bin size", render: (row) => escapeHtml(row.candidate_bin_size || "-") },
+      { label: "Current occupant", render: (row) => escapeHtml(row.current_occupant_sku || "Empty") },
+      { label: "Match score", render: (row) => formatDecimal(row.match_score || 0, 1) },
+      { label: "Why", render: (row) => escapeHtml(row.match_reason || "-") }
+    ],
+    "No prime-space candidate matches are available for the selected range."
+  );
+
+  primeSpaceWrap.innerHTML = `${summaryHtml}${tableHost.innerHTML}`;
 }
 
 function renderMetrics(reports) {
@@ -800,6 +873,7 @@ function renderReports(reports) {
   renderAbcVelocity(reports);
   renderLevelCompliance(reports);
   renderPickFaceSuitability(reports);
+  renderPrimeSpaceCandidates(reports);
   renderTopSkus(reports);
   renderSkuOutliers(reports);
   renderLocationOutliers(reports);
@@ -838,7 +912,8 @@ async function loadReports() {
         abc_velocity: { summary: [], skus: [] },
         slotting: { move_lower: [], move_to_pick_bin: [] },
         level_compliance: { summary: {}, easy_wins: [] },
-        pick_face_suitability: []
+        pick_face_suitability: [],
+        prime_space: { summary: {}, supply: [], demand: [], matches: [] }
       },
       daily_breakdown: []
     };
@@ -874,7 +949,7 @@ async function loadReports() {
     if (recommendationsSummaryWrap) {
       recommendationsSummaryWrap.innerHTML = `<p class="admin-empty">${escapeHtml(error.message || "Could not load the recommendation summary.")}</p>`;
     }
-    [moveLowerWrap, bulkToPickWrap, abcVelocityWrap, levelComplianceWrap, pickFaceSuitabilityWrap, topSkusWrap, skuOutliersWrap, locationOutliersWrap, topLocationsWrap, topAislesWrap, levelBreakdownWrap, binTypeWrap, binSizeWrap, highLevelSkusWrap, replenishmentWrap, dailyWrap].forEach((wrapper) => {
+    [moveLowerWrap, bulkToPickWrap, abcVelocityWrap, levelComplianceWrap, pickFaceSuitabilityWrap, primeSpaceWrap, topSkusWrap, skuOutliersWrap, locationOutliersWrap, topLocationsWrap, topAislesWrap, levelBreakdownWrap, binTypeWrap, binSizeWrap, highLevelSkusWrap, replenishmentWrap, dailyWrap].forEach((wrapper) => {
       if (wrapper) {
         wrapper.innerHTML = '<p class="admin-empty">Could not load this report section.</p>';
       }
