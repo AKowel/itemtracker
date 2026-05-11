@@ -239,7 +239,8 @@ async function createApp() {
       return res.redirect("/catalogue");
     }
     return res.render("login", {
-      pageTitle: `Login | ${config.appName}`
+      pageTitle: `Login | ${config.appName}`,
+      flash: getFlash(req)
     });
   });
 
